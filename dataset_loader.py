@@ -1,5 +1,5 @@
-import os
 import random
+from pathlib import Path
 import pandas as pd
 from PIL import Image
 
@@ -13,6 +13,10 @@ LABEL_TO_IDX = {
     "oncocytoma": 2,
     "papillary": 3,
 }
+
+PROJECT_ROOT = Path(__file__).resolve().parent
+DATA_ROOT = PROJECT_ROOT / "data"
+
 
 class WSIDataset(Dataset):
     def __init__(self, csv_path, split="train", num_patches=32, transform=None):
@@ -29,13 +33,13 @@ class WSIDataset(Dataset):
 
         wsi_id = row["wsi_id"]
         label_name = row["label"]
-        patch_dir = row["patch_dir"]
+        patch_dir = DATA_ROOT / row["patch_dir"]
 
         label = LABEL_TO_IDX[label_name]
 
         patch_files = [
-            f for f in os.listdir(patch_dir)
-            if f.lower().endswith((".png", ".jpg", ".jpeg", ".tif", ".tiff"))
+            f for f in patch_dir.iterdir()
+            if f.is_file() and f.suffix.lower() in [".png", ".jpg", ".jpeg", ".tif", ".tiff"]
         ]
 
         if len(patch_files) == 0:
@@ -47,8 +51,7 @@ class WSIDataset(Dataset):
             chosen = random.choices(patch_files, k=self.num_patches)
 
         images = []
-        for patch_file in chosen:
-            patch_path = os.path.join(patch_dir, patch_file)
+        for patch_path in chosen:
             image = Image.open(patch_path).convert("RGB")
 
             if self.transform:
@@ -56,7 +59,7 @@ class WSIDataset(Dataset):
 
             images.append(image)
 
-        images = torch.stack(images)   # shape: [num_patches, 3, 224, 224]
+        images = torch.stack(images)
         label = torch.tensor(label, dtype=torch.long)
 
         return images, label, wsi_id
