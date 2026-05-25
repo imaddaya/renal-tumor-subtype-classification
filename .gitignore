@@ -1,0 +1,36 @@
+# Python virtual environments
+venv/
+newvenv/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+
+# Data
+data/
+
+# OS / logs
+.DS_Store
+Thumbs.db
+*.log
+
+# Model weights
+Models/**/results/*.pth
+
+# Generated comparison outputs
+all_models_comparison_table.csv
+all_models_comparison_table.png
+model_comparison.csv
+
+# Accidental root npm lock file
+package-lock.json
+
+# Generated model result files
+Models/**/results/*.csv
+Models/**/results/*.txt
