@@ -35,6 +35,8 @@ MODEL_PATH = RESULTS_DIR / "ResNet18_model.pth"
 HISTORY_CSV = RESULTS_DIR / "ResNet18_history.csv"
 REPORT_TXT = RESULTS_DIR / "ResNet18_report.txt"
 
+RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+
 IDX_TO_LABEL = {
     0: "chromophobe",
     1: "clearcell",
@@ -100,10 +102,23 @@ model = SimpleWSIModel(num_classes=NUM_CLASSES).to(DEVICE)
 # -------------------------
 # Loss / Optimizer
 # -------------------------
-class_counts = torch.tensor([13, 331, 85, 91], dtype=torch.float32)
+label_order = [IDX_TO_LABEL[i] for i in range(NUM_CLASSES)]
+
+counts_series = train_dataset.df["label"].value_counts()
+class_counts = torch.tensor(
+    [float(counts_series.get(label_name, 0)) for label_name in label_order],
+    dtype=torch.float32
+)
+
+if (class_counts == 0).any():
+    raise ValueError(f"At least one class has zero samples in the training split: {class_counts.tolist()}")
+
 class_weights = 1.0 / class_counts
 class_weights = class_weights / class_weights.sum() * len(class_counts)
 class_weights = class_weights.to(DEVICE)
+
+print("Training class counts:", class_counts.tolist())
+print("Training class weights:", class_weights.tolist())
 
 criterion = nn.CrossEntropyLoss(weight=class_weights)
 optimizer = torch.optim.Adam(model.parameters(), lr=LR)
