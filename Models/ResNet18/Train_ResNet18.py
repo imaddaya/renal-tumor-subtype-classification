@@ -122,6 +122,42 @@ print("Training class weights:", class_weights.tolist())
 
 criterion = nn.CrossEntropyLoss(weight=class_weights)
 optimizer = torch.optim.Adam(model.parameters(), lr=LR)
+# -------------------------
+# idk
+# -------------------------
+def evaluate_model(model, loader, criterion, device, return_preds=False):
+    model.eval()
+
+    total_loss = 0.0
+    total_correct = 0
+    total_samples = 0
+    all_labels = []
+    all_preds = []
+
+    with torch.no_grad():
+        for images, labels, _ in loader:
+            images = images.to(device)
+            labels = labels.to(device)
+
+            outputs = model(images)
+            loss = criterion(outputs, labels)
+
+            total_loss += loss.item()
+            preds = outputs.argmax(dim=1)
+            total_correct += (preds == labels).sum().item()
+            total_samples += labels.size(0)
+
+            if return_preds:
+                all_labels.extend(labels.cpu().numpy())
+                all_preds.extend(preds.cpu().numpy())
+
+    avg_loss = total_loss / len(loader)
+    accuracy = total_correct / total_samples
+
+    if return_preds:
+        return avg_loss, accuracy, all_labels, all_preds
+
+    return avg_loss, accuracy
 
 # -------------------------
 # Training
@@ -152,26 +188,7 @@ for epoch in range(EPOCHS):
     train_loss_avg = train_loss / len(train_loader)
     train_acc = train_correct / train_total
 
-    model.eval()
-    val_loss = 0.0
-    val_correct = 0
-    val_total = 0
-
-    with torch.no_grad():
-        for images, labels, _ in val_loader:
-            images = images.to(DEVICE)
-            labels = labels.to(DEVICE)
-
-            outputs = model(images)
-            loss = criterion(outputs, labels)
-
-            val_loss += loss.item()
-            preds = outputs.argmax(dim=1)
-            val_correct += (preds == labels).sum().item()
-            val_total += labels.size(0)
-
-    val_loss_avg = val_loss / len(val_loader)
-    val_acc = val_correct / val_total
+    val_loss_avg, val_acc = evaluate_model(model, val_loader, criterion, DEVICE)
 
     history.append({
         "epoch": epoch + 1,
@@ -201,20 +218,9 @@ with open(HISTORY_CSV, "w", newline="", encoding="utf-8") as f:
 # -------------------------
 # Test evaluation
 # -------------------------
-model.eval()
-all_labels = []
-all_preds = []
-
-with torch.no_grad():
-    for images, labels, _ in test_loader:
-        images = images.to(DEVICE)
-        labels = labels.to(DEVICE)
-
-        outputs = model(images)
-        preds = outputs.argmax(dim=1)
-
-        all_labels.extend(labels.cpu().numpy())
-        all_preds.extend(preds.cpu().numpy())
+_, _, all_labels, all_preds = evaluate_model(
+    model, test_loader, criterion, DEVICE, return_preds=True
+)
 
 target_names = [IDX_TO_LABEL[i] for i in range(NUM_CLASSES)]
 report = classification_report(all_labels, all_preds, target_names=target_names, digits=4, zero_division=0)
