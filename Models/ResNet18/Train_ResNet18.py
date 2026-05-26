@@ -1,6 +1,10 @@
 import csv
 import sys
-sys.path.append("/home/hpdeadman/Grad_Project")
+from pathlib import Path
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+sys.path.append(str(PROJECT_ROOT))
+
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
@@ -10,19 +14,26 @@ from sklearn.metrics import classification_report, confusion_matrix
 from dataset_loader import WSIDataset, get_default_transform
 
 # -------------------------
+# Paths
+# -------------------------
+DATA_DIR = PROJECT_ROOT / "data"
+MODEL_DIR = PROJECT_ROOT / "Models" / "ResNet18"
+RESULTS_DIR = MODEL_DIR / "results"
+
+# -------------------------
 # Settings
 # -------------------------
-CSV_PATH = "/home/hpdeadman/Grad_Project/data/wsi_metadata.csv"
+CSV_PATH = DATA_DIR / "wsi_metadata.csv"
 BATCH_SIZE = 2
-NUM_PATCHES =  70
+NUM_PATCHES = 70
 NUM_CLASSES = 4
 EPOCHS = 20
 LR = 1e-4
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-MODEL_PATH = "/home/hpdeadman/Grad_Project/Models/ResNet18/results/ResNet18_model.pth"
-HISTORY_CSV = "/home/hpdeadman/Grad_Project/Models/ResNet18/results/ResNet18_history.csv"
-REPORT_TXT = "/home/hpdeadman/Grad_Project/Models/ResNet18/results/ResNet18_report.txt"
+MODEL_PATH = RESULTS_DIR / "ResNet18_model.pth"
+HISTORY_CSV = RESULTS_DIR / "ResNet18_history.csv"
+REPORT_TXT = RESULTS_DIR / "ResNet18_report.txt"
 
 IDX_TO_LABEL = {
     0: "chromophobe",
