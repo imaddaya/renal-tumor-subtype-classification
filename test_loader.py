@@ -1,7 +1,9 @@
+from pathlib import Path
 from torch.utils.data import DataLoader
 from dataset_loader import WSIDataset, get_default_transform
 
-csv_path = "/home/hpdeadman/Grad_Project/data/wsi_metadata.csv"
+PROJECT_ROOT = Path(__file__).resolve().parent
+csv_path = PROJECT_ROOT / "data" / "wsi_metadata.csv"
 
 dataset = WSIDataset(
     csv_path=csv_path,
