@@ -35,7 +35,7 @@ VAL_PATCHES = 400
 TEST_PATCHES = 140
 
 NUM_CLASSES = 4
-EPOCHS = 30
+EPOCHS = 20
 LR = 1e-4
 FIXED_SEED = 42
 
@@ -174,7 +174,7 @@ optimizer = torch.optim.Adam(model.parameters(), lr=LR)
 # -------------------------
 # Helpers
 # -------------------------
-def evaluate_model(model, loader, criterion, device, phase_name="", print_batches=False):
+def evaluate_model(model, loader, criterion, device, phase_name="", print_every=None):
     model.eval()
 
     total_loss = 0.0
@@ -183,8 +183,9 @@ def evaluate_model(model, loader, criterion, device, phase_name="", print_batche
 
     with torch.no_grad():
         for batch_idx, (images, labels, wsi_ids) in enumerate(loader):
-            if print_batches:
-                print(f"[{phase_name}][Batch {batch_idx + 1}] WSI IDs: {list(wsi_ids)}")
+            if print_every is not None:
+                if ((batch_idx + 1) % print_every == 0) or ((batch_idx + 1) == len(loader)):
+                    print(f"[{phase_name}][Batch {batch_idx + 1}/{len(loader)}] WSI IDs: {list(wsi_ids)}")
 
             images = images.to(device)
             labels = labels.to(device)
@@ -200,8 +201,7 @@ def evaluate_model(model, loader, criterion, device, phase_name="", print_batche
     avg_loss = total_loss / len(loader)
     avg_acc = total_correct / total_samples
     return avg_loss, avg_acc
-
-
+    
 def build_class_error_rows(cm, labels):
     rows = []
     for i, class_name in enumerate(labels):
@@ -236,8 +236,11 @@ for epoch in range(EPOCHS):
     train_total = 0
 
     for batch_idx, (images, labels, wsi_ids) in enumerate(train_loader):
-        if epoch == 0 and batch_idx < 10:
-            print(f"[Train][Epoch 1][Batch {batch_idx + 1}] WSI IDs: {list(wsi_ids)}")
+        if ((batch_idx + 1) % 100 == 0) or ((batch_idx + 1) == len(train_loader)):
+            print(
+                f"[Train][Epoch {epoch + 1}][Batch {batch_idx + 1}/{len(train_loader)}] "
+                f"WSI IDs: {list(wsi_ids)}"
+            )
 
         images = images.to(DEVICE)
         labels = labels.to(DEVICE)
@@ -262,7 +265,7 @@ for epoch in range(EPOCHS):
         criterion,
         DEVICE,
         phase_name="Validation",
-        print_batches=(epoch == 0)
+        print_every=10
     )
 
     history.append({
@@ -317,7 +320,8 @@ prob_rows = []
 
 with torch.no_grad():
     for batch_idx, (images, labels, wsi_ids) in enumerate(test_loader):
-        print(f"[Test][Batch {batch_idx + 1}] WSI IDs: {list(wsi_ids)}")
+        if ((batch_idx + 1) % 10 == 0) or ((batch_idx + 1) == len(test_loader)):
+            print(f"[Test][Batch {batch_idx + 1}/{len(test_loader)}] WSI IDs: {list(wsi_ids)}")
 
         images = images.to(DEVICE)
         labels = labels.to(DEVICE)
