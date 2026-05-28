@@ -134,23 +134,39 @@ def plot_confusion_matrix(cm: np.ndarray, labels, title: str, output_path: Path)
     plt.close()
 
 
-def build_detailed_error_table(cm: np.ndarray, short_labels):
+def format_number(x):
+    x = float(x)
+    if x.is_integer():
+        return str(int(x))
+    return f"{x:.2f}".rstrip("0").rstrip(".")
+
+
+def build_detailed_error_table(cm: np.ndarray):
+    full_names = [
+        "Chromophobe",
+        "Clear Cell",
+        "Oncocytoma",
+        "Papillary"
+    ]
+
+    short_cols = ["As C (%)", "As CC (%)", "As O (%)", "As P (%)"]
+
     row_sums = cm.sum(axis=1)
     rows = []
 
-    for i, actual_class in enumerate(short_labels):
+    for i, class_name in enumerate(full_names):
         total_true = int(row_sums[i])
+
         percentages = []
         for j in range(cm.shape[1]):
-            pct = (cm[i, j] / row_sums[i] * 100) if row_sums[i] > 0 else 0.0
-            percentages.append(round(pct, 2))
+            pct = (cm[i, j] / row_sums[i] * 100) if row_sums[i] > 0 else 0
+            percentages.append(format_number(pct))
 
-        correct_rate = round((cm[i, i] / row_sums[i] * 100), 2) if row_sums[i] > 0 else 0.0
-        error_rate = round(100 - correct_rate, 2)
+        correct_rate = format_number((cm[i, i] / row_sums[i] * 100) if row_sums[i] > 0 else 0)
+        error_rate = format_number(100 - float(correct_rate))
 
         rows.append([
-            actual_class,
-            total_true,
+            class_name,
             percentages[0],
             percentages[1],
             percentages[2],
@@ -163,17 +179,14 @@ def build_detailed_error_table(cm: np.ndarray, short_labels):
         rows,
         columns=[
             "Actual Class",
-            "True Samples",
-            "As C (%)",
-            "As CC (%)",
-            "As O (%)",
-            "As P (%)",
+            "Predicted as C (%)",
+            "Predicted as CC (%)",
+            "Predicted as O (%)",
+            "Predicted as P (%)",
             "Correct Rate (%)",
             "Error Rate (%)"
         ]
     )
-
-
 def build_summary_table(history_df, report_df, fixed_cm, fixed_class_error_df, multi_cm):
     best_val_acc = float(history_df["val_acc"].max())
     fixed_test_acc = float(np.trace(fixed_cm) / np.sum(fixed_cm)) if np.sum(fixed_cm) > 0 else 0.0
@@ -265,7 +278,7 @@ save_table_png(
 # -------------------------
 # 3) Detailed prediction/error table
 # -------------------------
-detailed_error_df = build_detailed_error_table(fixed_cm, SHORT_LABELS)
+detailed_error_df = build_detailed_error_table(fixed_cm)
 
 save_table_png(
     detailed_error_df,
