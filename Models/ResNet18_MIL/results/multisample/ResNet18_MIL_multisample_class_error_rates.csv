@@ -1,0 +1,5 @@
+class,total_true_samples,correct_predictions,recall,error_rate,error_rate_percent
+chromophobe,5,0,0.0,1.0,100.0
+clearcell,5,3,0.6,0.4,40.0
+oncocytoma,5,5,1.0,0.0,0.0
+papillary,5,3,0.6,0.4,40.0

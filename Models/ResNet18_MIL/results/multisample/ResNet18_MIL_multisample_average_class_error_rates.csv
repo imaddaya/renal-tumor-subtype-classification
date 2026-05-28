@@ -1,0 +1,5 @@
+class,avg_recall_across_runs,avg_error_rate_across_runs,avg_error_rate_percent_across_runs
+chromophobe,0.02,0.98,98.0
+clearcell,0.62,0.38,38.0
+oncocytoma,1.0,0.0,0.0
+papillary,0.6,0.4,40.0
