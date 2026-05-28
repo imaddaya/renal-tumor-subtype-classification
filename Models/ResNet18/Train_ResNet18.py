@@ -19,7 +19,12 @@ from dataset_loader import WSIDataset, get_default_transform
 DATA_DIR = PROJECT_ROOT / "data"
 MODEL_DIR = PROJECT_ROOT / "Models" / "ResNet18"
 RESULTS_DIR = MODEL_DIR / "results"
-RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+
+TRAINING_DIR = RESULTS_DIR / "training"
+FIXED_TEST_DIR = RESULTS_DIR / "fixed_test"
+
+TRAINING_DIR.mkdir(parents=True, exist_ok=True)
+FIXED_TEST_DIR.mkdir(parents=True, exist_ok=True)
 
 # -------------------------
 # Settings
@@ -41,12 +46,13 @@ FIXED_SEED = 42
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-MODEL_PATH = RESULTS_DIR / "ResNet18_model.pth"
-HISTORY_CSV = RESULTS_DIR / "ResNet18_history.csv"
-REPORT_TXT = RESULTS_DIR / "ResNet18_report.txt"
-CM_CSV = RESULTS_DIR / "ResNet18_confusion_matrix.csv"
-PROBS_CSV = RESULTS_DIR / "ResNet18_probabilities.csv"
-CLASS_ERROR_CSV = RESULTS_DIR / "ResNet18_class_error_rates.csv"
+MODEL_PATH = TRAINING_DIR / "ResNet18_model.pth"
+HISTORY_CSV = TRAINING_DIR / "ResNet18_history.csv"
+
+REPORT_TXT = FIXED_TEST_DIR / "ResNet18_report.txt"
+CM_CSV = FIXED_TEST_DIR / "ResNet18_confusion_matrix.csv"
+PROBS_CSV = FIXED_TEST_DIR / "ResNet18_probabilities.csv"
+CLASS_ERROR_CSV = FIXED_TEST_DIR / "ResNet18_class_error_rates.csv"
 
 IDX_TO_LABEL = {
     0: "chromophobe",
