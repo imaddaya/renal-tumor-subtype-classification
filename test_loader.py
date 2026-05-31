@@ -4,12 +4,16 @@ from dataset_loader import WSIDataset, get_default_transform
 
 PROJECT_ROOT = Path(__file__).resolve().parent
 csv_path = PROJECT_ROOT / "data" / "wsi_metadata.csv"
+patch_quality_csv = PROJECT_ROOT / "patch_whiteness_audit.csv"
 
 dataset = WSIDataset(
     csv_path=csv_path,
     split="train",
     num_patches=8,
-    transform=get_default_transform()
+    transform=get_default_transform(),
+    sampling_mode="random",
+    patch_quality_csv=patch_quality_csv,
+    use_patch_quality_weights=True,
 )
 
 loader = DataLoader(dataset, batch_size=2, shuffle=True)
