@@ -1,9 +1,11 @@
 import csv
 import sys
-sys.path.append("/home/hpdeadman/Grad_Project")
-
-import os
 import random
+from pathlib import Path
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+sys.path.append(str(PROJECT_ROOT))
+
 import numpy as np
 import pandas as pd
 from PIL import Image
@@ -16,24 +18,40 @@ from sklearn.metrics import classification_report, confusion_matrix
 import torchstain
 
 # -------------------------
+# Paths
+# -------------------------
+DATA_DIR = PROJECT_ROOT / "data"
+MODEL_DIR = PROJECT_ROOT / "Models" / "ResNet18_MIL_Macenko"
+RESULTS_DIR = MODEL_DIR / "results"
+
+TRAINING_DIR = RESULTS_DIR / "training"
+MULTISAMPLE_DIR = RESULTS_DIR / "multisample"
+
+TRAINING_DIR.mkdir(parents=True, exist_ok=True)
+MULTISAMPLE_DIR.mkdir(parents=True, exist_ok=True)
+
+# -------------------------
 # Settings
 # -------------------------
-CSV_PATH = "/home/hpdeadman/Grad_Project/data/wsi_metadata.csv"
-TARGET_IMAGE_PATH = "/home/hpdeadman/Grad_Project/data/train/c/DHMC_0040/p_2688_3808.jpg"
-MODEL_PATH = "/home/hpdeadman/Grad_Project/Models/ResNet18_MIL_Macenko/results/ResNet18_MIL_Macenko_model.pth"
+CSV_PATH = DATA_DIR / "wsi_metadata.csv"
+TARGET_IMAGE_PATH = DATA_DIR / "train" / "c" / "DHMC_0040" / "p_2688_3808.jpg"
+MODEL_PATH = TRAINING_DIR / "ResNet18_MIL_Macenko_model.pth"
 
 NUM_CLASSES = 4
-NUM_PATCHES = 70
+NUM_PATCHES = 140
 NUM_RUNS = 10
 BATCH_SIZE = 1
+NUM_WORKERS = 2
+ATTN_DIM = 128
+
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-REPORT_TXT = "/home/hpdeadman/Grad_Project/Models/ResNet18_MIL_Macenko/results/ResNet18_MIL_Macenko_multisample_report.txt"
-CM_CSV = "/home/hpdeadman/Grad_Project/Models/ResNet18_MIL_Macenko/results/ResNet18_MIL_Macenko_multisample_confusion_matrix.csv"
-PROBS_CSV = "/home/hpdeadman/Grad_Project/Models/ResNet18_MIL_Macenko/results/ResNet18_MIL_Macenko_multisample_probabilities.csv"
-CLASS_ERROR_CSV = "/home/hpdeadman/Grad_Project/Models/ResNet18_MIL_Macenko/results/ResNet18_MIL_Macenko_multisample_class_error_rates.csv"
-AVG_CLASS_ERROR_CSV = "/home/hpdeadman/Grad_Project/Models/ResNet18_MIL_Macenko/results/ResNet18_MIL_Macenko_multisample_average_class_error_rates.csv"
-PER_RUN_CSV = "/home/hpdeadman/Grad_Project/Models/ResNet18_MIL_Macenko/results/ResNet18_MIL_Macenko_multisample_per_run_predictions.csv"
+REPORT_TXT = MULTISAMPLE_DIR / "ResNet18_MIL_Macenko_multisample_report.txt"
+CM_CSV = MULTISAMPLE_DIR / "ResNet18_MIL_Macenko_multisample_confusion_matrix.csv"
+PROBS_CSV = MULTISAMPLE_DIR / "ResNet18_MIL_Macenko_multisample_probabilities.csv"
+CLASS_ERROR_CSV = MULTISAMPLE_DIR / "ResNet18_MIL_Macenko_multisample_class_error_rates.csv"
+AVG_CLASS_ERROR_CSV = MULTISAMPLE_DIR / "ResNet18_MIL_Macenko_multisample_average_class_error_rates.csv"
+PER_RUN_CSV = MULTISAMPLE_DIR / "ResNet18_MIL_Macenko_multisample_per_run_predictions.csv"
 
 IDX_TO_LABEL = {
     0: "chromophobe",
@@ -67,6 +85,7 @@ target_img = Image.open(TARGET_IMAGE_PATH).convert("RGB")
 target_tensor = macenko_transform(target_img)
 normalizer.fit(target_tensor)
 
+
 def macenko_normalize_pil(pil_img):
     src = macenko_transform(pil_img)
     norm = normalizer.normalize(src)[0]
@@ -82,6 +101,7 @@ def macenko_normalize_pil(pil_img):
     arr = np.clip(arr, 0, 255).astype(np.uint8)
     return Image.fromarray(arr)
 
+
 def get_default_transform():
     return transforms.Compose([
         transforms.Resize((224, 224)),
@@ -92,11 +112,23 @@ def get_default_transform():
 # Dataset with Macenko
 # -------------------------
 class WSIDatasetMacenko(Dataset):
-    def __init__(self, csv_path, split="train", num_patches=32, transform=None):
+    def __init__(
+        self,
+        csv_path,
+        split="test",
+        num_patches=32,
+        transform=None,
+        sampling_mode="random",
+    ):
         self.df = pd.read_csv(csv_path)
         self.df = self.df[self.df["split"] == split].reset_index(drop=True)
+
         self.num_patches = num_patches
         self.transform = transform
+        self.sampling_mode = sampling_mode
+
+        if self.sampling_mode not in ["random", "fixed"]:
+            raise ValueError("sampling_mode must be either 'random' or 'fixed'")
 
     def __len__(self):
         return len(self.df)
@@ -106,26 +138,34 @@ class WSIDatasetMacenko(Dataset):
 
         wsi_id = row["wsi_id"]
         label_name = row["label"]
-        patch_dir = row["patch_dir"]
+        patch_dir = DATA_DIR / row["patch_dir"]
+
+        if not patch_dir.exists():
+            raise FileNotFoundError(f"Patch directory not found: {patch_dir}")
+
+        if label_name not in LABEL_TO_IDX:
+            raise ValueError(f"Unknown label '{label_name}' for WSI {wsi_id}")
 
         label = LABEL_TO_IDX[label_name]
 
-        patch_files = [
-            f for f in os.listdir(patch_dir)
-            if f.lower().endswith((".png", ".jpg", ".jpeg", ".tif", ".tiff"))
-        ]
+        patch_files = sorted([
+            f for f in patch_dir.iterdir()
+            if f.is_file() and f.suffix.lower() in [".png", ".jpg", ".jpeg", ".tif", ".tiff"]
+        ])
 
         if len(patch_files) == 0:
             raise ValueError(f"No patch images found in {patch_dir}")
 
-        if len(patch_files) >= self.num_patches:
-            chosen = random.sample(patch_files, self.num_patches)
+        if self.sampling_mode == "random":
+            if len(patch_files) >= self.num_patches:
+                chosen = random.sample(patch_files, self.num_patches)
+            else:
+                chosen = random.choices(patch_files, k=self.num_patches)
         else:
-            chosen = random.choices(patch_files, k=self.num_patches)
+            chosen = patch_files[:self.num_patches] if len(patch_files) >= self.num_patches else random.choices(patch_files, k=self.num_patches)
 
         images = []
-        for patch_file in chosen:
-            patch_path = os.path.join(patch_dir, patch_file)
+        for patch_path in chosen:
             image = Image.open(patch_path).convert("RGB")
 
             try:
@@ -144,22 +184,27 @@ class WSIDatasetMacenko(Dataset):
         return images, label, wsi_id
 
 # -------------------------
-# Test Dataset / Loader
+# Dataset / Loader
 # -------------------------
 test_dataset = WSIDatasetMacenko(
     csv_path=CSV_PATH,
     split="test",
     num_patches=NUM_PATCHES,
-    transform=get_default_transform()
+    transform=get_default_transform(),
+    sampling_mode="random",
 )
 
 test_loader = DataLoader(
     test_dataset,
     batch_size=BATCH_SIZE,
     shuffle=False,
-    num_workers=2,
+    num_workers=NUM_WORKERS,
     pin_memory=True
 )
+
+print("\n=== Multi-sample test summary ===")
+print(f"Test WSIs: {len(test_dataset)}")
+print("Test WSI IDs:", test_dataset.df["wsi_id"].tolist())
 
 # -------------------------
 # Model: ResNet18 + Attention MIL
@@ -195,9 +240,31 @@ class AttentionMILModel(nn.Module):
         out = self.classifier(slide_feats)
         return out
 
-model = AttentionMILModel(num_classes=NUM_CLASSES).to(DEVICE)
+
+model = AttentionMILModel(num_classes=NUM_CLASSES, attn_dim=ATTN_DIM).to(DEVICE)
 model.load_state_dict(torch.load(MODEL_PATH, map_location=DEVICE))
 model.eval()
+
+# -------------------------
+# Helpers
+# -------------------------
+def build_class_error_rows(cm, labels):
+    rows = []
+    for i, class_name in enumerate(labels):
+        row_sum = cm[i].sum()
+        correct = cm[i, i]
+        recall = correct / row_sum if row_sum > 0 else 0.0
+        error_rate = 1.0 - recall if row_sum > 0 else 0.0
+
+        rows.append({
+            "class": class_name,
+            "total_true_samples": int(row_sum),
+            "correct_predictions": int(correct),
+            "recall": round(recall, 4),
+            "error_rate": round(error_rate, 4),
+            "error_rate_percent": round(error_rate * 100, 2)
+        })
+    return rows
 
 # -------------------------
 # Multi-sample inference
@@ -210,13 +277,16 @@ per_run_error_rows = []
 
 with torch.no_grad():
     for run_idx in range(NUM_RUNS):
-        print(f"\nRunning test-time sampling pass {run_idx + 1}/{NUM_RUNS} ...")
+        print(f"\n=== Running test-time sampling pass {run_idx + 1}/{NUM_RUNS} ===")
 
         run_probs = []
         run_labels = []
         run_wsi_ids = []
 
-        for images, labels, wsi_ids in test_loader:
+        for batch_idx, (images, labels, wsi_ids) in enumerate(test_loader):
+            if ((batch_idx + 1) % 10 == 0) or ((batch_idx + 1) == len(test_loader)):
+                print(f"[Run {run_idx + 1}][Batch {batch_idx + 1}/{len(test_loader)}] WSI IDs: {list(wsi_ids)}")
+
             images = images.to(DEVICE)
             labels = labels.to(DEVICE)
 
@@ -251,25 +321,16 @@ with torch.no_grad():
         run_labels_np = np.array(run_labels)
         run_cm = confusion_matrix(run_labels_np, run_preds, labels=list(range(NUM_CLASSES)))
 
-        for i, class_name in enumerate(LABELS):
-            row_sum = run_cm[i].sum()
-            correct = run_cm[i, i]
-            recall = correct / row_sum if row_sum > 0 else 0.0
-            error_rate = 1.0 - recall if row_sum > 0 else 0.0
-
-            per_run_error_rows.append({
-                "run": run_idx + 1,
-                "class": class_name,
-                "total_true_samples": int(row_sum),
-                "correct_predictions": int(correct),
-                "recall": round(recall, 4),
-                "error_rate": round(error_rate, 4),
-                "error_rate_percent": round(error_rate * 100, 2)
-            })
+        run_error_rows = build_class_error_rows(run_cm, LABELS)
+        for row in run_error_rows:
+            row["run"] = run_idx + 1
+            per_run_error_rows.append(row)
 
 all_run_probs = np.stack(all_run_probs, axis=0)
 
+# -------------------------
 # Average probabilities across repeated runs
+# -------------------------
 avg_probs = all_run_probs.mean(axis=0)
 final_preds = avg_probs.argmax(axis=1)
 true_labels = np.array(true_labels_reference)
@@ -285,31 +346,13 @@ report = classification_report(
     zero_division=0
 )
 
-cm = confusion_matrix(true_labels, final_preds)
+cm = confusion_matrix(true_labels, final_preds, labels=list(range(NUM_CLASSES)))
+class_error_rows = build_class_error_rows(cm, LABELS)
 
 print("\nMulti-sample Classification Report:")
 print(report)
 print("Multi-sample Confusion Matrix:")
 print(cm)
-
-# -------------------------
-# Final class-specific error rates
-# -------------------------
-class_error_rows = []
-for i, class_name in enumerate(LABELS):
-    row_sum = cm[i].sum()
-    correct = cm[i, i]
-    recall = correct / row_sum if row_sum > 0 else 0.0
-    error_rate = 1.0 - recall if row_sum > 0 else 0.0
-
-    class_error_rows.append({
-        "class": class_name,
-        "total_true_samples": int(row_sum),
-        "correct_predictions": int(correct),
-        "recall": round(recall, 4),
-        "error_rate": round(error_rate, 4),
-        "error_rate_percent": round(error_rate * 100, 2)
-    })
 
 print("\nFinal class-specific error rates (from averaged predictions):")
 for row in class_error_rows:
@@ -378,12 +421,18 @@ with open(REPORT_TXT, "w", encoding="utf-8") as f:
             f"({row['avg_error_rate_percent_across_runs']:.2f}%)\n"
         )
 
+# -------------------------
+# Save confusion matrix CSV
+# -------------------------
 with open(CM_CSV, "w", newline="", encoding="utf-8") as f:
     writer = csv.writer(f)
     writer.writerow(["true/pred"] + LABELS)
     for i, class_name in enumerate(LABELS):
         writer.writerow([class_name] + cm[i].tolist())
 
+# -------------------------
+# Save averaged probabilities per WSI
+# -------------------------
 with open(PROBS_CSV, "w", newline="", encoding="utf-8") as f:
     writer = csv.writer(f)
     writer.writerow([
@@ -407,6 +456,9 @@ with open(PROBS_CSV, "w", newline="", encoding="utf-8") as f:
             round(float(avg_probs[i, 3]), 6),
         ])
 
+# -------------------------
+# Save final class error rates CSV
+# -------------------------
 with open(CLASS_ERROR_CSV, "w", newline="", encoding="utf-8") as f:
     writer = csv.DictWriter(
         f,
@@ -422,6 +474,9 @@ with open(CLASS_ERROR_CSV, "w", newline="", encoding="utf-8") as f:
     writer.writeheader()
     writer.writerows(class_error_rows)
 
+# -------------------------
+# Save average class error rates CSV
+# -------------------------
 with open(AVG_CLASS_ERROR_CSV, "w", newline="", encoding="utf-8") as f:
     writer = csv.DictWriter(
         f,
@@ -435,6 +490,9 @@ with open(AVG_CLASS_ERROR_CSV, "w", newline="", encoding="utf-8") as f:
     writer.writeheader()
     writer.writerows(avg_class_error_rows)
 
+# -------------------------
+# Save per-run predictions CSV
+# -------------------------
 with open(PER_RUN_CSV, "w", newline="", encoding="utf-8") as f:
     writer = csv.DictWriter(
         f,

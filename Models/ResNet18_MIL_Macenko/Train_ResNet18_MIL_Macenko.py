@@ -1,9 +1,12 @@
 import csv
 import sys
-sys.path.append("/home/hpdeadman/Grad_Project")
-
-import os
 import random
+import hashlib
+from pathlib import Path
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+sys.path.append(str(PROJECT_ROOT))
+
 import numpy as np
 import pandas as pd
 from PIL import Image
@@ -16,20 +19,47 @@ from sklearn.metrics import classification_report, confusion_matrix
 import torchstain
 
 # -------------------------
+# Paths
+# -------------------------
+DATA_DIR = PROJECT_ROOT / "data"
+MODEL_DIR = PROJECT_ROOT / "Models" / "ResNet18_MIL_Macenko"
+RESULTS_DIR = MODEL_DIR / "results"
+
+TRAINING_DIR = RESULTS_DIR / "training"
+FIXED_TEST_DIR = RESULTS_DIR / "fixed_test"
+
+TRAINING_DIR.mkdir(parents=True, exist_ok=True)
+FIXED_TEST_DIR.mkdir(parents=True, exist_ok=True)
+
+# -------------------------
 # Settings
 # -------------------------
-CSV_PATH = "/home/hpdeadman/Grad_Project/data/wsi_metadata.csv"
-TARGET_IMAGE_PATH = "/home/hpdeadman/Grad_Project/data/train/c/DHMC_0040/p_2688_3808.jpg"  
-BATCH_SIZE = 2
-NUM_PATCHES = 70
+CSV_PATH = DATA_DIR / "wsi_metadata.csv"
+TARGET_IMAGE_PATH = DATA_DIR / "train" / "c" / "DHMC_0040" / "p_2688_3808.jpg"
+
+TRAIN_BATCH_SIZE = 1
+EVAL_BATCH_SIZE = 1
+NUM_WORKERS = 2
+
+TRAIN_PATCHES = 150
+VAL_PATCHES = 400
+TEST_PATCHES = 140
+
 NUM_CLASSES = 4
 EPOCHS = 20
 LR = 1e-4
+FIXED_SEED = 42
+ATTN_DIM = 128
+
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-MODEL_PATH = "/home/hpdeadman/Grad_Project/Models/ResNet18_MIL_Macenko/results/ResNet18_MIL_Macenko_model.pth"
-HISTORY_CSV = "/home/hpdeadman/Grad_Project/Models/ResNet18_MIL_Macenko/results/ResNet18_MIL_Macenko_history.csv"
-REPORT_TXT = "/home/hpdeadman/Grad_Project/Models/ResNet18_MIL_Macenko/results/ResNet18_MIL_Macenko_report.txt"
+MODEL_PATH = TRAINING_DIR / "ResNet18_MIL_Macenko_model.pth"
+HISTORY_CSV = TRAINING_DIR / "ResNet18_MIL_Macenko_history.csv"
+
+REPORT_TXT = FIXED_TEST_DIR / "ResNet18_MIL_Macenko_report.txt"
+CM_CSV = FIXED_TEST_DIR / "ResNet18_MIL_Macenko_confusion_matrix.csv"
+PROBS_CSV = FIXED_TEST_DIR / "ResNet18_MIL_Macenko_probabilities.csv"
+CLASS_ERROR_CSV = FIXED_TEST_DIR / "ResNet18_MIL_Macenko_class_error_rates.csv"
 
 IDX_TO_LABEL = {
     0: "chromophobe",
@@ -44,6 +74,8 @@ LABEL_TO_IDX = {
     "oncocytoma": 2,
     "papillary": 3,
 }
+
+LABELS = [IDX_TO_LABEL[i] for i in range(NUM_CLASSES)]
 
 print("Using device:", DEVICE)
 
@@ -61,11 +93,11 @@ target_img = Image.open(TARGET_IMAGE_PATH).convert("RGB")
 target_tensor = macenko_transform(target_img)
 normalizer.fit(target_tensor)
 
+
 def macenko_normalize_pil(pil_img):
     src = macenko_transform(pil_img)
     norm = normalizer.normalize(src)[0]
 
-    # torchstain may return CHW or HWC depending on backend/version
     if isinstance(norm, torch.Tensor):
         arr = norm.detach().cpu().numpy()
     else:
@@ -77,21 +109,43 @@ def macenko_normalize_pil(pil_img):
     arr = np.clip(arr, 0, 255).astype(np.uint8)
     return Image.fromarray(arr)
 
+
 def get_default_transform():
     return transforms.Compose([
         transforms.Resize((224, 224)),
         transforms.ToTensor(),
     ])
 
+
+def _stable_seed(wsi_id: str, fixed_seed: int) -> int:
+    text = f"{wsi_id}_{fixed_seed}"
+    digest = hashlib.md5(text.encode("utf-8")).hexdigest()
+    return int(digest[:8], 16)
+
+
 # -------------------------
 # Dataset with Macenko
 # -------------------------
 class WSIDatasetMacenko(Dataset):
-    def __init__(self, csv_path, split="train", num_patches=32, transform=None):
+    def __init__(
+        self,
+        csv_path,
+        split="train",
+        num_patches=32,
+        transform=None,
+        sampling_mode="random",
+        fixed_seed=42,
+    ):
         self.df = pd.read_csv(csv_path)
         self.df = self.df[self.df["split"] == split].reset_index(drop=True)
+
         self.num_patches = num_patches
         self.transform = transform
+        self.sampling_mode = sampling_mode
+        self.fixed_seed = fixed_seed
+
+        if self.sampling_mode not in ["random", "fixed"]:
+            raise ValueError("sampling_mode must be either 'random' or 'fixed'")
 
     def __len__(self):
         return len(self.df)
@@ -101,26 +155,38 @@ class WSIDatasetMacenko(Dataset):
 
         wsi_id = row["wsi_id"]
         label_name = row["label"]
-        patch_dir = row["patch_dir"]
+        patch_dir = DATA_DIR / row["patch_dir"]
+
+        if not patch_dir.exists():
+            raise FileNotFoundError(f"Patch directory not found: {patch_dir}")
+
+        if label_name not in LABEL_TO_IDX:
+            raise ValueError(f"Unknown label '{label_name}' for WSI {wsi_id}")
 
         label = LABEL_TO_IDX[label_name]
 
-        patch_files = [
-            f for f in os.listdir(patch_dir)
-            if f.lower().endswith((".png", ".jpg", ".jpeg", ".tif", ".tiff"))
-        ]
+        patch_files = sorted([
+            f for f in patch_dir.iterdir()
+            if f.is_file() and f.suffix.lower() in [".png", ".jpg", ".jpeg", ".tif", ".tiff"]
+        ])
 
         if len(patch_files) == 0:
             raise ValueError(f"No patch images found in {patch_dir}")
 
-        if len(patch_files) >= self.num_patches:
-            chosen = random.sample(patch_files, self.num_patches)
+        if self.sampling_mode == "random":
+            if len(patch_files) >= self.num_patches:
+                chosen = random.sample(patch_files, self.num_patches)
+            else:
+                chosen = random.choices(patch_files, k=self.num_patches)
         else:
-            chosen = random.choices(patch_files, k=self.num_patches)
+            rng = random.Random(_stable_seed(wsi_id, self.fixed_seed))
+            if len(patch_files) >= self.num_patches:
+                chosen = rng.sample(patch_files, self.num_patches)
+            else:
+                chosen = rng.choices(patch_files, k=self.num_patches)
 
         images = []
-        for patch_file in chosen:
-            patch_path = os.path.join(patch_dir, patch_file)
+        for patch_path in chosen:
             image = Image.open(patch_path).convert("RGB")
 
             try:
@@ -138,33 +204,68 @@ class WSIDatasetMacenko(Dataset):
 
         return images, label, wsi_id
 
+
 # -------------------------
 # Dataset / Loader
 # -------------------------
 train_dataset = WSIDatasetMacenko(
     csv_path=CSV_PATH,
     split="train",
-    num_patches=NUM_PATCHES,
-    transform=get_default_transform()
+    num_patches=TRAIN_PATCHES,
+    transform=get_default_transform(),
+    sampling_mode="random",
 )
 
 val_dataset = WSIDatasetMacenko(
     csv_path=CSV_PATH,
     split="validate",
-    num_patches=NUM_PATCHES,
-    transform=get_default_transform()
+    num_patches=VAL_PATCHES,
+    transform=get_default_transform(),
+    sampling_mode="fixed",
+    fixed_seed=FIXED_SEED,
 )
 
 test_dataset = WSIDatasetMacenko(
     csv_path=CSV_PATH,
     split="test",
-    num_patches=NUM_PATCHES,
-    transform=get_default_transform()
+    num_patches=TEST_PATCHES,
+    transform=get_default_transform(),
+    sampling_mode="fixed",
+    fixed_seed=FIXED_SEED,
 )
 
-train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True, num_workers=2, pin_memory=True)
-val_loader = DataLoader(val_dataset, batch_size=BATCH_SIZE, shuffle=False, num_workers=2, pin_memory=True)
-test_loader = DataLoader(test_dataset, batch_size=BATCH_SIZE, shuffle=False, num_workers=2, pin_memory=True)
+train_loader = DataLoader(
+    train_dataset,
+    batch_size=TRAIN_BATCH_SIZE,
+    shuffle=True,
+    num_workers=NUM_WORKERS,
+    pin_memory=True
+)
+
+val_loader = DataLoader(
+    val_dataset,
+    batch_size=EVAL_BATCH_SIZE,
+    shuffle=False,
+    num_workers=NUM_WORKERS,
+    pin_memory=True
+)
+
+test_loader = DataLoader(
+    test_dataset,
+    batch_size=EVAL_BATCH_SIZE,
+    shuffle=False,
+    num_workers=NUM_WORKERS,
+    pin_memory=True
+)
+
+print("\n=== Split summary ===")
+print(f"Train WSIs: {len(train_dataset)}")
+print(f"Validation WSIs: {len(val_dataset)}")
+print(f"Test WSIs: {len(test_dataset)}")
+
+print("\nTrain WSI IDs (first 10):", train_dataset.df["wsi_id"].tolist()[:10])
+print("Validation WSI IDs:", val_dataset.df["wsi_id"].tolist())
+print("Test WSI IDs:", test_dataset.df["wsi_id"].tolist())
 
 # -------------------------
 # Model: ResNet18 + Attention MIL
@@ -200,23 +301,91 @@ class AttentionMILModel(nn.Module):
         out = self.classifier(slide_feats)
         return out
 
-model = AttentionMILModel(num_classes=NUM_CLASSES).to(DEVICE)
+
+model = AttentionMILModel(num_classes=NUM_CLASSES, attn_dim=ATTN_DIM).to(DEVICE)
 
 # -------------------------
 # Loss / Optimizer
 # -------------------------
-class_counts = torch.tensor([13, 331, 85, 91], dtype=torch.float32)
+counts_series = train_dataset.df["label"].value_counts()
+class_counts = torch.tensor(
+    [float(counts_series.get(label_name, 0)) for label_name in LABELS],
+    dtype=torch.float32
+)
+
+if (class_counts == 0).any():
+    raise ValueError(
+        f"At least one class has zero samples in the training split: {class_counts.tolist()}"
+    )
+
 class_weights = 1.0 / class_counts
 class_weights = class_weights / class_weights.sum() * len(class_counts)
 class_weights = class_weights.to(DEVICE)
+
+print("\nTraining class counts:", class_counts.tolist())
+print("Training class weights:", class_weights.tolist())
 
 criterion = nn.CrossEntropyLoss(weight=class_weights)
 optimizer = torch.optim.Adam(model.parameters(), lr=LR)
 
 # -------------------------
+# Helpers
+# -------------------------
+def evaluate_model(model, loader, criterion, device, phase_name="", print_every=None):
+    model.eval()
+
+    total_loss = 0.0
+    total_correct = 0
+    total_samples = 0
+
+    with torch.no_grad():
+        for batch_idx, (images, labels, wsi_ids) in enumerate(loader):
+            if print_every is not None:
+                if ((batch_idx + 1) % print_every == 0) or ((batch_idx + 1) == len(loader)):
+                    print(f"[{phase_name}][Batch {batch_idx + 1}/{len(loader)}] WSI IDs: {list(wsi_ids)}")
+
+            images = images.to(device)
+            labels = labels.to(device)
+
+            outputs = model(images)
+            loss = criterion(outputs, labels)
+
+            total_loss += loss.item()
+            preds = outputs.argmax(dim=1)
+            total_correct += (preds == labels).sum().item()
+            total_samples += labels.size(0)
+
+    avg_loss = total_loss / len(loader)
+    avg_acc = total_correct / total_samples
+    return avg_loss, avg_acc
+
+
+def build_class_error_rows(cm, labels):
+    rows = []
+    for i, class_name in enumerate(labels):
+        row_sum = cm[i].sum()
+        correct = cm[i, i]
+        recall = correct / row_sum if row_sum > 0 else 0.0
+        error_rate = 1.0 - recall if row_sum > 0 else 0.0
+
+        rows.append({
+            "class": class_name,
+            "total_true_samples": int(row_sum),
+            "correct_predictions": int(correct),
+            "recall": round(recall, 4),
+            "error_rate": round(error_rate, 4),
+            "error_rate_percent": round(error_rate * 100, 2)
+        })
+    return rows
+
+
+# -------------------------
 # Training
 # -------------------------
 history = []
+
+best_val_acc = -1.0
+best_epoch = -1
 
 for epoch in range(EPOCHS):
     model.train()
@@ -224,7 +393,13 @@ for epoch in range(EPOCHS):
     train_correct = 0
     train_total = 0
 
-    for images, labels, _ in train_loader:
+    for batch_idx, (images, labels, wsi_ids) in enumerate(train_loader):
+        if ((batch_idx + 1) % 100 == 0) or ((batch_idx + 1) == len(train_loader)):
+            print(
+                f"[Train][Epoch {epoch + 1}][Batch {batch_idx + 1}/{len(train_loader)}] "
+                f"WSI IDs: {list(wsi_ids)}"
+            )
+
         images = images.to(DEVICE)
         labels = labels.to(DEVICE)
 
@@ -242,26 +417,14 @@ for epoch in range(EPOCHS):
     train_loss_avg = train_loss / len(train_loader)
     train_acc = train_correct / train_total
 
-    model.eval()
-    val_loss = 0.0
-    val_correct = 0
-    val_total = 0
-
-    with torch.no_grad():
-        for images, labels, _ in val_loader:
-            images = images.to(DEVICE)
-            labels = labels.to(DEVICE)
-
-            outputs = model(images)
-            loss = criterion(outputs, labels)
-
-            val_loss += loss.item()
-            preds = outputs.argmax(dim=1)
-            val_correct += (preds == labels).sum().item()
-            val_total += labels.size(0)
-
-    val_loss_avg = val_loss / len(val_loader)
-    val_acc = val_correct / val_total
+    val_loss_avg, val_acc = evaluate_model(
+        model,
+        val_loader,
+        criterion,
+        DEVICE,
+        phase_name="Validation",
+        print_every=10
+    )
 
     history.append({
         "epoch": epoch + 1,
@@ -271,48 +434,102 @@ for epoch in range(EPOCHS):
         "val_acc": val_acc,
     })
 
+    if val_acc > best_val_acc:
+        best_val_acc = val_acc
+        best_epoch = epoch + 1
+        torch.save(model.state_dict(), MODEL_PATH)
+        print(f"Saved new best model at epoch {best_epoch} with val_acc={best_val_acc:.4f}")
+
     print(
-        f"Epoch [{epoch+1}/{EPOCHS}] "
+        f"Epoch [{epoch + 1}/{EPOCHS}] "
         f"Train Loss: {train_loss_avg:.4f} "
         f"Train Acc: {train_acc:.4f} "
         f"Val Loss: {val_loss_avg:.4f} "
         f"Val Acc: {val_acc:.4f}"
     )
 
-torch.save(model.state_dict(), MODEL_PATH)
+print(f"\nBest model was from epoch {best_epoch} with validation accuracy {best_val_acc:.4f}")
 
+# -------------------------
+# Save history CSV
+# -------------------------
 with open(HISTORY_CSV, "w", newline="", encoding="utf-8") as f:
-    writer = csv.DictWriter(f, fieldnames=["epoch", "train_loss", "train_acc", "val_loss", "val_acc"])
+    writer = csv.DictWriter(
+        f,
+        fieldnames=["epoch", "train_loss", "train_acc", "val_loss", "val_acc"]
+    )
     writer.writeheader()
     writer.writerows(history)
 
 # -------------------------
-# Test evaluation
+# Load best model before final test
 # -------------------------
+model.load_state_dict(torch.load(MODEL_PATH, map_location=DEVICE))
 model.eval()
+
+# -------------------------
+# Fixed test evaluation
+# -------------------------
+print("\n=== Fixed test evaluation ===")
+
 all_labels = []
 all_preds = []
+prob_rows = []
 
 with torch.no_grad():
-    for images, labels, _ in test_loader:
+    for batch_idx, (images, labels, wsi_ids) in enumerate(test_loader):
+        if ((batch_idx + 1) % 10 == 0) or ((batch_idx + 1) == len(test_loader)):
+            print(f"[Test][Batch {batch_idx + 1}/{len(test_loader)}] WSI IDs: {list(wsi_ids)}")
+
         images = images.to(DEVICE)
         labels = labels.to(DEVICE)
 
         outputs = model(images)
+        probs = torch.softmax(outputs, dim=1)
         preds = outputs.argmax(dim=1)
 
-        all_labels.extend(labels.cpu().numpy())
-        all_preds.extend(preds.cpu().numpy())
+        all_labels.extend(labels.cpu().tolist())
+        all_preds.extend(preds.cpu().tolist())
 
-target_names = [IDX_TO_LABEL[i] for i in range(NUM_CLASSES)]
-report = classification_report(all_labels, all_preds, target_names=target_names, digits=4, zero_division=0)
-cm = confusion_matrix(all_labels, all_preds)
+        for b in range(len(wsi_ids)):
+            prob_rows.append({
+                "wsi_id": wsi_ids[b],
+                "true_label": IDX_TO_LABEL[int(labels[b].cpu().item())],
+                "predicted_label": IDX_TO_LABEL[int(preds[b].cpu().item())],
+                "prob_chromophobe": round(float(probs[b, 0].cpu().item()), 6),
+                "prob_clearcell": round(float(probs[b, 1].cpu().item()), 6),
+                "prob_oncocytoma": round(float(probs[b, 2].cpu().item()), 6),
+                "prob_papillary": round(float(probs[b, 3].cpu().item()), 6),
+            })
+
+report = classification_report(
+    all_labels,
+    all_preds,
+    target_names=LABELS,
+    digits=4,
+    zero_division=0
+)
+
+cm = confusion_matrix(all_labels, all_preds, labels=list(range(NUM_CLASSES)))
+class_error_rows = build_class_error_rows(cm, LABELS)
 
 print("\nClassification Report:")
 print(report)
 print("Confusion Matrix:")
 print(cm)
 
+print("\nClass-specific Error Rates:")
+for row in class_error_rows:
+    print(
+        f"{row['class']}: "
+        f"recall={row['recall']:.4f}, "
+        f"error_rate={row['error_rate']:.4f} "
+        f"({row['error_rate_percent']:.2f}%)"
+    )
+
+# -------------------------
+# Save main report TXT
+# -------------------------
 with open(REPORT_TXT, "w", encoding="utf-8") as f:
     f.write("Classification Report:\n")
     f.write(report)
@@ -320,7 +537,56 @@ with open(REPORT_TXT, "w", encoding="utf-8") as f:
     f.write(str(cm))
     f.write("\n")
 
+# -------------------------
+# Save confusion matrix CSV
+# -------------------------
+with open(CM_CSV, "w", newline="", encoding="utf-8") as f:
+    writer = csv.writer(f)
+    writer.writerow(["true/pred"] + LABELS)
+    for i, class_name in enumerate(LABELS):
+        writer.writerow([class_name] + cm[i].tolist())
+
+# -------------------------
+# Save fixed-test probabilities CSV
+# -------------------------
+with open(PROBS_CSV, "w", newline="", encoding="utf-8") as f:
+    writer = csv.DictWriter(
+        f,
+        fieldnames=[
+            "wsi_id",
+            "true_label",
+            "predicted_label",
+            "prob_chromophobe",
+            "prob_clearcell",
+            "prob_oncocytoma",
+            "prob_papillary"
+        ]
+    )
+    writer.writeheader()
+    writer.writerows(prob_rows)
+
+# -------------------------
+# Save class error rates CSV
+# -------------------------
+with open(CLASS_ERROR_CSV, "w", newline="", encoding="utf-8") as f:
+    writer = csv.DictWriter(
+        f,
+        fieldnames=[
+            "class",
+            "total_true_samples",
+            "correct_predictions",
+            "recall",
+            "error_rate",
+            "error_rate_percent"
+        ]
+    )
+    writer.writeheader()
+    writer.writerows(class_error_rows)
+
 print("\nSaved:")
 print(MODEL_PATH)
 print(HISTORY_CSV)
 print(REPORT_TXT)
+print(CM_CSV)
+print(PROBS_CSV)
+print(CLASS_ERROR_CSV)
