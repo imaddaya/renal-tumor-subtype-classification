@@ -30,6 +30,7 @@ FIXED_TEST_DIR.mkdir(parents=True, exist_ok=True)
 # Settings
 # -------------------------
 CSV_PATH = DATA_DIR / "wsi_metadata.csv"
+PATCH_QUALITY_CSV = PROJECT_ROOT / "patch_whiteness_audit.csv"
 
 TRAIN_BATCH_SIZE = 1
 EVAL_BATCH_SIZE = 1
@@ -64,6 +65,7 @@ IDX_TO_LABEL = {
 LABELS = [IDX_TO_LABEL[i] for i in range(NUM_CLASSES)]
 
 print("Using device:", DEVICE)
+print("Patch quality CSV:", PATCH_QUALITY_CSV)
 
 # -------------------------
 # Dataset / Loader
@@ -74,6 +76,8 @@ train_dataset = WSIDataset(
     num_patches=TRAIN_PATCHES,
     transform=get_default_transform(),
     sampling_mode="random",
+    patch_quality_csv=PATCH_QUALITY_CSV,
+    use_patch_quality_weights=True,
 )
 
 val_dataset = WSIDataset(
@@ -83,6 +87,8 @@ val_dataset = WSIDataset(
     transform=get_default_transform(),
     sampling_mode="fixed",
     fixed_seed=FIXED_SEED,
+    patch_quality_csv=PATCH_QUALITY_CSV,
+    use_patch_quality_weights=True,
 )
 
 test_dataset = WSIDataset(
@@ -92,6 +98,8 @@ test_dataset = WSIDataset(
     transform=get_default_transform(),
     sampling_mode="fixed",
     fixed_seed=FIXED_SEED,
+    patch_quality_csv=PATCH_QUALITY_CSV,
+    use_patch_quality_weights=True,
 )
 
 train_loader = DataLoader(
@@ -207,7 +215,8 @@ def evaluate_model(model, loader, criterion, device, phase_name="", print_every=
     avg_loss = total_loss / len(loader)
     avg_acc = total_correct / total_samples
     return avg_loss, avg_acc
-    
+
+
 def build_class_error_rows(cm, labels):
     rows = []
     for i, class_name in enumerate(labels):
@@ -377,7 +386,6 @@ for row in class_error_rows:
 
 # -------------------------
 # Save main report TXT
-# Keep this simple so old parsing logic stays easy
 # -------------------------
 with open(REPORT_TXT, "w", encoding="utf-8") as f:
     f.write("Classification Report:\n")

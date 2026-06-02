@@ -1,5 +1,5 @@
 true/pred,chromophobe,clearcell,oncocytoma,papillary
-chromophobe,0,0,5,0
-clearcell,0,3,2,0
-oncocytoma,0,0,2,3
-papillary,0,0,0,5
+chromophobe,0,5,0,0
+clearcell,0,4,1,0
+oncocytoma,0,5,0,0
+papillary,0,2,0,3

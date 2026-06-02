@@ -31,6 +31,7 @@ MULTISAMPLE_DIR.mkdir(parents=True, exist_ok=True)
 # Settings
 # -------------------------
 CSV_PATH = DATA_DIR / "wsi_metadata.csv"
+PATCH_QUALITY_CSV = PROJECT_ROOT / "patch_whiteness_audit.csv"
 MODEL_PATH = TRAINING_DIR / "ResNet18_MIL_KAN_model.pth"
 
 NUM_CLASSES = 4
@@ -61,6 +62,7 @@ IDX_TO_LABEL = {
 LABELS = [IDX_TO_LABEL[i] for i in range(NUM_CLASSES)]
 
 print("Using device:", DEVICE)
+print("Patch quality CSV:", PATCH_QUALITY_CSV)
 
 # -------------------------
 # Dataset / Loader
@@ -71,6 +73,8 @@ test_dataset = WSIDataset(
     num_patches=NUM_PATCHES,
     transform=get_default_transform(),
     sampling_mode="random",
+    patch_quality_csv=PATCH_QUALITY_CSV,
+    use_patch_quality_weights=True,
 )
 
 test_loader = DataLoader(

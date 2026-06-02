@@ -31,6 +31,7 @@ MULTISAMPLE_DIR.mkdir(parents=True, exist_ok=True)
 # Settings
 # -------------------------
 CSV_PATH = DATA_DIR / "wsi_metadata.csv"
+PATCH_QUALITY_CSV = PROJECT_ROOT / "patch_whiteness_audit.csv"
 MODEL_PATH = TRAINING_DIR / "ResNet18_model.pth"
 
 NUM_CLASSES = 4
@@ -58,6 +59,7 @@ IDX_TO_LABEL = {
 LABELS = [IDX_TO_LABEL[i] for i in range(NUM_CLASSES)]
 
 print("Using device:", DEVICE)
+print("Patch quality CSV:", PATCH_QUALITY_CSV)
 
 # -------------------------
 # Dataset / Loader
@@ -68,6 +70,8 @@ test_dataset = WSIDataset(
     num_patches=NUM_PATCHES,
     transform=get_default_transform(),
     sampling_mode="random",
+    patch_quality_csv=PATCH_QUALITY_CSV,
+    use_patch_quality_weights=True,
 )
 
 test_loader = DataLoader(
@@ -182,9 +186,6 @@ with torch.no_grad():
             true_labels_reference = run_labels
             wsi_ids_reference = run_wsi_ids
 
-        # -------------------------
-        # Per-run confusion matrix and class error rates
-        # -------------------------
         run_preds = run_probs.argmax(axis=1)
         run_labels_np = np.array(run_labels)
         run_cm = confusion_matrix(run_labels_np, run_preds, labels=list(range(NUM_CLASSES)))
