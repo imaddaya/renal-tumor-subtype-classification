@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import "./App.css";
 
 const MODELS = [
@@ -11,6 +11,9 @@ const MODELS = [
 ];
 
 const CLASSES = ["chromophobe", "clearcell", "oncocytoma", "papillary"];
+
+const MIN_PATCHES = 70;
+const MAX_PATCHES = 500;
 
 function getBackendUrl(modelName) {
   const venvModels = [
@@ -31,7 +34,31 @@ function getBackendUrl(modelName) {
 }
 
 function formatPct(v) {
-  return `${(v * 100).toFixed(2)}%`;
+  return `${(Number(v || 0) * 100).toFixed(2)}%`;
+}
+
+function formatBackendError(data) {
+  if (!data) return "Prediction failed.";
+
+  if (typeof data.error === "string") return data.error;
+  if (typeof data.detail === "string") return data.detail;
+
+  if (data.detail && typeof data.detail === "object") {
+    if (typeof data.detail.error === "string") return data.detail.error;
+
+    if (
+      data.detail.required_minimum_usable &&
+      data.detail.usable_count !== undefined
+    ) {
+      return `Not enough usable patches after filtering. Usable: ${data.detail.usable_count}, required: ${data.detail.required_minimum_usable}.`;
+    }
+
+    return JSON.stringify(data.detail, null, 2);
+  }
+
+  if (typeof data.message === "string") return data.message;
+
+  return "Prediction failed.";
 }
 
 export default function App() {
@@ -52,16 +79,26 @@ export default function App() {
     }));
   }, [imageFiles]);
 
-  const probabilities =
-    result?.probabilities ?? {
-      chromophobe: 0,
-      clearcell: 0,
-      oncocytoma: 0,
-      papillary: 0,
+  useEffect(() => {
+    return () => {
+      previewUrls.forEach((item) => URL.revokeObjectURL(item.url));
     };
+  }, [previewUrls]);
+
+  const probabilities = result?.probabilities ?? {
+    chromophobe: 0,
+    clearcell: 0,
+    oncocytoma: 0,
+    papillary: 0,
+  };
 
   const predictedLabel = result?.predicted_label ?? "-";
-  const confidence = predictedLabel !== "-" ? probabilities[predictedLabel] || 0 : 0;
+  const confidence =
+    predictedLabel !== "-" ? probabilities[predictedLabel] || 0 : 0;
+
+  const usedPatches = result?.used_patches ?? [];
+  const topImportantPatches = result?.top_important_patches ?? [];
+  const selectionSummary = result?.selection_summary ?? null;
 
   const handleFilesChange = (e) => {
     const files = Array.from(e.target.files || []);
@@ -71,13 +108,10 @@ export default function App() {
   };
 
   const handlePredict = async () => {
-    if (imageFiles.length === 0) {
-      setErrorMessage("Please choose patch images first.");
-      return;
-    }
-
-    if (imageFiles.length < 2) {
-      setErrorMessage("Please upload multiple patches from the same WSI, not just one slice.");
+    if (imageFiles.length < MIN_PATCHES || imageFiles.length > MAX_PATCHES) {
+      setErrorMessage(
+        `Please upload between ${MIN_PATCHES} and ${MAX_PATCHES} patches from the same biopsy/WSI.`
+      );
       return;
     }
 
@@ -101,8 +135,12 @@ export default function App() {
 
       const data = await response.json();
 
-      if (!response.ok || data.error) {
-        throw new Error(data.error || "Prediction failed.");
+      if (!response.ok) {
+        throw new Error(formatBackendError(data));
+      }
+
+      if (data?.error) {
+        throw new Error(formatBackendError(data));
       }
 
       setResult(data);
@@ -119,8 +157,10 @@ export default function App() {
     setSavedRows((prev) => [
       {
         id: Date.now().toString(),
-        sampleName: imageFiles[0].name,
-        patchCount: imageFiles.length,
+        sampleName: imageFiles[0]?.name || "sample",
+        patchCountUploaded: result.patch_count_uploaded ?? imageFiles.length,
+        patchCountUsed: result.patch_count_used ?? 0,
+        patchCountDropped: result.patch_count_dropped ?? 0,
         model: selectedModel,
         trueLabel,
         predictedLabel: result.predicted_label,
@@ -153,7 +193,8 @@ export default function App() {
       <div className="container">
         <h1>RCC WSI Patch Inference Demo</h1>
         <p className="subtitle">
-          Upload multiple patches from the same WSI, choose the model and the known correct label, then run inference and compare saved results across models.
+          Upload patches from one biopsy / one WSI, choose a model and the known
+          label, then run inference and compare results across models.
         </p>
 
         <div className="grid">
@@ -199,7 +240,7 @@ export default function App() {
             </div>
 
             <div className="field">
-              <label>Upload patches from one WSI</label>
+              <label>Upload patches from one WSI / one biopsy</label>
               <input
                 ref={inputRef}
                 type="file"
@@ -208,7 +249,9 @@ export default function App() {
                 onChange={handleFilesChange}
               />
               <p className="small-text">
-                Upload several patches from the same test WSI. The backend will use up to 70 patches and pad if fewer are provided.
+                Upload between {MIN_PATCHES} and {MAX_PATCHES} patches. The
+                backend will filter low-tissue / very white patches, sort by
+                tissue content, and use the best 70 patches for inference.
               </p>
             </div>
 
@@ -224,17 +267,26 @@ export default function App() {
 
             <div className="stats-grid single-top-gap">
               <div className="stat-box">
-                <span className="stat-label">Selected patches</span>
+                <span className="stat-label">Uploaded patches</span>
                 <strong>{imageFiles.length}</strong>
               </div>
               <div className="stat-box">
-                <span className="stat-label">Target label</span>
-                <strong>{trueLabel}</strong>
+                <span className="stat-label">Allowed range</span>
+                <strong>
+                  {MIN_PATCHES} - {MAX_PATCHES}
+                </strong>
               </div>
             </div>
 
             <div className="button-row three">
-              <button onClick={handlePredict} disabled={imageFiles.length === 0 || isLoading}>
+              <button
+                onClick={handlePredict}
+                disabled={
+                  isLoading ||
+                  imageFiles.length < MIN_PATCHES ||
+                  imageFiles.length > MAX_PATCHES
+                }
+              >
                 {isLoading ? "Running..." : "Run inference"}
               </button>
               <button onClick={handleSaveResult} disabled={!result || isLoading}>
@@ -250,6 +302,7 @@ export default function App() {
 
           <div className="card">
             <h2>Patch preview</h2>
+
             {previewUrls.length > 0 ? (
               <>
                 <div className="preview-grid">
@@ -260,8 +313,11 @@ export default function App() {
                     </div>
                   ))}
                 </div>
+
                 {imageFiles.length > 12 && (
-                  <p className="small-text">Showing first 12 previews out of {imageFiles.length} patches.</p>
+                  <p className="small-text">
+                    Showing first 12 previews out of {imageFiles.length} patches.
+                  </p>
                 )}
               </>
             ) : (
@@ -275,7 +331,9 @@ export default function App() {
             <h2>Prediction result</h2>
 
             {!result ? (
-              <div className="empty-box">Run inference to see the model prediction.</div>
+              <div className="empty-box">
+                Run inference to see the model prediction.
+              </div>
             ) : (
               <>
                 <div className="stats-grid">
@@ -287,16 +345,68 @@ export default function App() {
                     <span className="stat-label">Predicted label</span>
                     <strong>{predictedLabel}</strong>
                   </div>
+                  <div className="stat-box">
+                    <span className="stat-label">Uploaded</span>
+                    <strong>{result.patch_count_uploaded}</strong>
+                  </div>
+                  <div className="stat-box">
+                    <span className="stat-label">Used</span>
+                    <strong>{result.patch_count_used}</strong>
+                  </div>
+                  <div className="stat-box">
+                    <span className="stat-label">Dropped / Not used</span>
+                    <strong>{result.patch_count_dropped}</strong>
+                  </div>
+                  <div className="stat-box">
+                    <span className="stat-label">Confidence</span>
+                    <strong>{formatPct(confidence)}</strong>
+                  </div>
                 </div>
 
                 <div className="tags">
                   <span className="tag">Model: {selectedModel}</span>
-                  <span className="tag">Confidence: {formatPct(confidence)}</span>
+                  <span className="tag">
+                    Patch importance:{" "}
+                    {result.patch_importance_supported ? "Supported" : "Not supported"}
+                  </span>
                   <span className={result.correct ? "tag success" : "tag danger"}>
                     {result.correct ? "Correct" : "Incorrect"}
                   </span>
                 </div>
 
+                {selectionSummary && (
+                  <>
+                    <h3>Selection summary</h3>
+                    <div className="table-wrap">
+                      <table>
+                        <tbody>
+                          <tr>
+                            <th>Uploaded count</th>
+                            <td>{selectionSummary.uploaded_count}</td>
+                          </tr>
+                          <tr>
+                            <th>Usable after filtering</th>
+                            <td>{selectionSummary.usable_count_after_filtering}</td>
+                          </tr>
+                          <tr>
+                            <th>Dropped count</th>
+                            <td>{selectionSummary.dropped_count}</td>
+                          </tr>
+                          <tr>
+                            <th>Target patch count</th>
+                            <td>{selectionSummary.target_patch_count}</td>
+                          </tr>
+                          <tr>
+                            <th>Selection rule</th>
+                            <td>{selectionSummary.selection_rule}</td>
+                          </tr>
+                        </tbody>
+                      </table>
+                    </div>
+                  </>
+                )}
+
+                <h3>Class probabilities</h3>
                 <div className="prob-list">
                   {CLASSES.map((label) => (
                     <div key={label} className="prob-item">
@@ -313,6 +423,58 @@ export default function App() {
                     </div>
                   ))}
                 </div>
+
+                <h3>Used patches</h3>
+                <div className="table-wrap">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Rank</th>
+                        <th>Filename</th>
+                        <th>White %</th>
+                        <th>Tissue %</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {usedPatches.map((patch) => (
+                        <tr key={`${patch.rank}-${patch.filename}`}>
+                          <td>{patch.rank}</td>
+                          <td>{patch.filename}</td>
+                          <td>{patch.white_percent}</td>
+                          <td>{patch.tissue_percent}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                {result.patch_importance_supported && topImportantPatches?.length > 0 && (
+                  <>
+                    <h3>Top important patches</h3>
+                    <div className="table-wrap">
+                      <table>
+                        <thead>
+                          <tr>
+                            <th>Filename</th>
+                            <th>Attention weight</th>
+                            <th>White %</th>
+                            <th>Tissue %</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {topImportantPatches.map((patch) => (
+                            <tr key={`${patch.filename}-${patch.attention_weight}`}>
+                              <td>{patch.filename}</td>
+                              <td>{patch.attention_weight}</td>
+                              <td>{patch.white_percent}</td>
+                              <td>{patch.tissue_percent}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </>
+                )}
               </>
             )}
           </div>
@@ -328,7 +490,9 @@ export default function App() {
                   <thead>
                     <tr>
                       <th>Sample</th>
-                      <th>Patches</th>
+                      <th>Uploaded</th>
+                      <th>Used</th>
+                      <th>Dropped</th>
                       <th>Model</th>
                       <th>True</th>
                       <th>Predicted</th>
@@ -341,7 +505,9 @@ export default function App() {
                     {savedRows.map((row) => (
                       <tr key={row.id}>
                         <td>{row.sampleName}</td>
-                        <td>{row.patchCount}</td>
+                        <td>{row.patchCountUploaded}</td>
+                        <td>{row.patchCountUsed}</td>
+                        <td>{row.patchCountDropped}</td>
                         <td>{row.model}</td>
                         <td>{row.trueLabel}</td>
                         <td>{row.predictedLabel}</td>
@@ -352,7 +518,10 @@ export default function App() {
                           </span>
                         </td>
                         <td>
-                          <button className="danger-btn" onClick={() => removeSaved(row.id)}>
+                          <button
+                            className="danger-btn"
+                            onClick={() => removeSaved(row.id)}
+                          >
                             Remove
                           </button>
                         </td>
