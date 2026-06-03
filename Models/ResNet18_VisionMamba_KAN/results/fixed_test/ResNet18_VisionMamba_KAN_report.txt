@@ -1,0 +1,17 @@
+Classification Report:
+              precision    recall  f1-score   support
+
+ chromophobe     0.0000    0.0000    0.0000         5
+   clearcell     0.4444    0.8000    0.5714         5
+  oncocytoma     0.3750    0.6000    0.4615         5
+   papillary     0.6667    0.4000    0.5000         5
+
+    accuracy                         0.4500        20
+   macro avg     0.3715    0.4500    0.3832        20
+weighted avg     0.3715    0.4500    0.3832        20
+
+Confusion Matrix:
+[[0 3 2 0]
+ [0 4 1 0]
+ [0 1 3 1]
+ [0 1 2 2]]

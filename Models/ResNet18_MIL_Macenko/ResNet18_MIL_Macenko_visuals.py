@@ -171,10 +171,10 @@ def build_detailed_error_table(cm: np.ndarray):
         rows,
         columns=[
             "Actual Class",
-            "As C (%)",
-            "As CC (%)",
-            "As O (%)",
-            "As P (%)",
+            "Predicted as C (%)",
+            "Predicted as CC (%)",
+            "Predicted as O (%)",
+            "Predicted as P (%)",
             "Correct Rate (%)",
             "Error Rate (%)"
         ]

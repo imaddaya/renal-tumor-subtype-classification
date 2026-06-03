@@ -1,6 +1,9 @@
 import csv
 import sys
-sys.path.append("/home/hpdeadman/Grad_Project")
+from pathlib import Path
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+sys.path.append(str(PROJECT_ROOT))
 
 import torch
 import torch.nn as nn
@@ -13,23 +16,39 @@ from mamba_ssm import Mamba
 from dataset_loader import WSIDataset, get_default_transform
 
 # -------------------------
+# Paths
+# -------------------------
+DATA_DIR = PROJECT_ROOT / "data"
+MODEL_DIR = PROJECT_ROOT / "Models" / "ResNet18_VisionMamba"
+RESULTS_DIR = MODEL_DIR / "results"
+
+TRAINING_DIR = RESULTS_DIR / "training"
+MULTISAMPLE_DIR = RESULTS_DIR / "multisample"
+
+TRAINING_DIR.mkdir(parents=True, exist_ok=True)
+MULTISAMPLE_DIR.mkdir(parents=True, exist_ok=True)
+
+# -------------------------
 # Settings
 # -------------------------
-CSV_PATH = "/home/hpdeadman/Grad_Project/data/wsi_metadata.csv"
-MODEL_PATH = "/home/hpdeadman/Grad_Project/Models/ResNet18_VisionMamba/results/ResNet18_VisionMamba_model.pth"
+CSV_PATH = DATA_DIR / "wsi_metadata.csv"
+PATCH_QUALITY_CSV = PROJECT_ROOT / "patch_whiteness_audit.csv"
+MODEL_PATH = TRAINING_DIR / "ResNet18_VisionMamba_model.pth"
 
 NUM_CLASSES = 4
-NUM_PATCHES = 70
+NUM_PATCHES = 140
 NUM_RUNS = 10
 BATCH_SIZE = 1
+NUM_WORKERS = 2
+
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-REPORT_TXT = "/home/hpdeadman/Grad_Project/Models/ResNet18_VisionMamba/results/ResNet18_VisionMamba_multisample_report.txt"
-CM_CSV = "/home/hpdeadman/Grad_Project/Models/ResNet18_VisionMamba/results/ResNet18_VisionMamba_multisample_confusion_matrix.csv"
-PROBS_CSV = "/home/hpdeadman/Grad_Project/Models/ResNet18_VisionMamba/results/ResNet18_VisionMamba_multisample_probabilities.csv"
-CLASS_ERROR_CSV = "/home/hpdeadman/Grad_Project/Models/ResNet18_VisionMamba/results/ResNet18_VisionMamba_multisample_class_error_rates.csv"
-AVG_CLASS_ERROR_CSV = "/home/hpdeadman/Grad_Project/Models/ResNet18_VisionMamba/results/ResNet18_VisionMamba_multisample_average_class_error_rates.csv"
-PER_RUN_CSV = "/home/hpdeadman/Grad_Project/Models/ResNet18_VisionMamba/results/ResNet18_VisionMamba_multisample_per_run_predictions.csv"
+REPORT_TXT = MULTISAMPLE_DIR / "ResNet18_VisionMamba_multisample_report.txt"
+CM_CSV = MULTISAMPLE_DIR / "ResNet18_VisionMamba_multisample_confusion_matrix.csv"
+PROBS_CSV = MULTISAMPLE_DIR / "ResNet18_VisionMamba_multisample_probabilities.csv"
+CLASS_ERROR_CSV = MULTISAMPLE_DIR / "ResNet18_VisionMamba_multisample_class_error_rates.csv"
+AVG_CLASS_ERROR_CSV = MULTISAMPLE_DIR / "ResNet18_VisionMamba_multisample_average_class_error_rates.csv"
+PER_RUN_CSV = MULTISAMPLE_DIR / "ResNet18_VisionMamba_multisample_per_run_predictions.csv"
 
 IDX_TO_LABEL = {
     0: "chromophobe",
@@ -41,6 +60,7 @@ IDX_TO_LABEL = {
 LABELS = [IDX_TO_LABEL[i] for i in range(NUM_CLASSES)]
 
 print("Using device:", DEVICE)
+print("Patch quality CSV:", PATCH_QUALITY_CSV)
 
 # -------------------------
 # Dataset / Loader
@@ -49,16 +69,23 @@ test_dataset = WSIDataset(
     csv_path=CSV_PATH,
     split="test",
     num_patches=NUM_PATCHES,
-    transform=get_default_transform()
+    transform=get_default_transform(),
+    sampling_mode="random",
+    patch_quality_csv=PATCH_QUALITY_CSV,
+    use_patch_quality_weights=True,
 )
 
 test_loader = DataLoader(
     test_dataset,
     batch_size=BATCH_SIZE,
     shuffle=False,
-    num_workers=2,
+    num_workers=NUM_WORKERS,
     pin_memory=True
 )
+
+print("\n=== Multi-sample test summary ===")
+print(f"Test WSIs: {len(test_dataset)}")
+print("Test WSI IDs:", test_dataset.df["wsi_id"].tolist())
 
 # -------------------------
 # Model: ResNet18 + Vision Mamba
@@ -82,7 +109,7 @@ class ResNet18VisionMambaModel(nn.Module):
         self.classifier = nn.Linear(feat_dim, num_classes)
 
     def forward(self, x):
-        # x shape: [B, N, 3, 224, 224]
+        # x: [B, N, 3, 224, 224]
         B, N, C, H, W = x.shape
 
         x = x.view(B * N, C, H, W)
@@ -92,12 +119,33 @@ class ResNet18VisionMambaModel(nn.Module):
         seq_out = self.mamba(feats)
         slide_feats = seq_out.mean(dim=1)
         out = self.classifier(slide_feats)
-
         return out
+
 
 model = ResNet18VisionMambaModel(num_classes=NUM_CLASSES).to(DEVICE)
 model.load_state_dict(torch.load(MODEL_PATH, map_location=DEVICE))
 model.eval()
+
+# -------------------------
+# Helpers
+# -------------------------
+def build_class_error_rows(cm, labels):
+    rows = []
+    for i, class_name in enumerate(labels):
+        row_sum = cm[i].sum()
+        correct = cm[i, i]
+        recall = correct / row_sum if row_sum > 0 else 0.0
+        error_rate = 1.0 - recall if row_sum > 0 else 0.0
+
+        rows.append({
+            "class": class_name,
+            "total_true_samples": int(row_sum),
+            "correct_predictions": int(correct),
+            "recall": round(recall, 4),
+            "error_rate": round(error_rate, 4),
+            "error_rate_percent": round(error_rate * 100, 2)
+        })
+    return rows
 
 # -------------------------
 # Multi-sample inference
@@ -110,13 +158,16 @@ per_run_error_rows = []
 
 with torch.no_grad():
     for run_idx in range(NUM_RUNS):
-        print(f"\nRunning test-time sampling pass {run_idx + 1}/{NUM_RUNS} ...")
+        print(f"\n=== Running test-time sampling pass {run_idx + 1}/{NUM_RUNS} ===")
 
         run_probs = []
         run_labels = []
         run_wsi_ids = []
 
-        for images, labels, wsi_ids in test_loader:
+        for batch_idx, (images, labels, wsi_ids) in enumerate(test_loader):
+            if ((batch_idx + 1) % 10 == 0) or ((batch_idx + 1) == len(test_loader)):
+                print(f"[Run {run_idx + 1}][Batch {batch_idx + 1}/{len(test_loader)}] WSI IDs: {list(wsi_ids)}")
+
             images = images.to(DEVICE)
             labels = labels.to(DEVICE)
 
@@ -147,30 +198,20 @@ with torch.no_grad():
             true_labels_reference = run_labels
             wsi_ids_reference = run_wsi_ids
 
-        # Per-run confusion matrix and class error rates
         run_preds = run_probs.argmax(axis=1)
         run_labels_np = np.array(run_labels)
         run_cm = confusion_matrix(run_labels_np, run_preds, labels=list(range(NUM_CLASSES)))
 
-        for i, class_name in enumerate(LABELS):
-            row_sum = run_cm[i].sum()
-            correct = run_cm[i, i]
-            recall = correct / row_sum if row_sum > 0 else 0.0
-            error_rate = 1.0 - recall if row_sum > 0 else 0.0
-
-            per_run_error_rows.append({
-                "run": run_idx + 1,
-                "class": class_name,
-                "total_true_samples": int(row_sum),
-                "correct_predictions": int(correct),
-                "recall": round(recall, 4),
-                "error_rate": round(error_rate, 4),
-                "error_rate_percent": round(error_rate * 100, 2)
-            })
+        run_error_rows = build_class_error_rows(run_cm, LABELS)
+        for row in run_error_rows:
+            row["run"] = run_idx + 1
+            per_run_error_rows.append(row)
 
 all_run_probs = np.stack(all_run_probs, axis=0)
 
+# -------------------------
 # Average probabilities across repeated runs
+# -------------------------
 avg_probs = all_run_probs.mean(axis=0)
 final_preds = avg_probs.argmax(axis=1)
 true_labels = np.array(true_labels_reference)
@@ -186,31 +227,13 @@ report = classification_report(
     zero_division=0
 )
 
-cm = confusion_matrix(true_labels, final_preds)
+cm = confusion_matrix(true_labels, final_preds, labels=list(range(NUM_CLASSES)))
+class_error_rows = build_class_error_rows(cm, LABELS)
 
 print("\nMulti-sample Classification Report:")
 print(report)
 print("Multi-sample Confusion Matrix:")
 print(cm)
-
-# -------------------------
-# Final class-specific error rates
-# -------------------------
-class_error_rows = []
-for i, class_name in enumerate(LABELS):
-    row_sum = cm[i].sum()
-    correct = cm[i, i]
-    recall = correct / row_sum if row_sum > 0 else 0.0
-    error_rate = 1.0 - recall if row_sum > 0 else 0.0
-
-    class_error_rows.append({
-        "class": class_name,
-        "total_true_samples": int(row_sum),
-        "correct_predictions": int(correct),
-        "recall": round(recall, 4),
-        "error_rate": round(error_rate, 4),
-        "error_rate_percent": round(error_rate * 100, 2)
-    })
 
 print("\nFinal class-specific error rates (from averaged predictions):")
 for row in class_error_rows:
@@ -279,14 +302,18 @@ with open(REPORT_TXT, "w", encoding="utf-8") as f:
             f"({row['avg_error_rate_percent_across_runs']:.2f}%)\n"
         )
 
+# -------------------------
 # Save confusion matrix CSV
+# -------------------------
 with open(CM_CSV, "w", newline="", encoding="utf-8") as f:
     writer = csv.writer(f)
     writer.writerow(["true/pred"] + LABELS)
     for i, class_name in enumerate(LABELS):
         writer.writerow([class_name] + cm[i].tolist())
 
+# -------------------------
 # Save averaged probabilities per WSI
+# -------------------------
 with open(PROBS_CSV, "w", newline="", encoding="utf-8") as f:
     writer = csv.writer(f)
     writer.writerow([
@@ -310,7 +337,9 @@ with open(PROBS_CSV, "w", newline="", encoding="utf-8") as f:
             round(float(avg_probs[i, 3]), 6),
         ])
 
+# -------------------------
 # Save final class error rates CSV
+# -------------------------
 with open(CLASS_ERROR_CSV, "w", newline="", encoding="utf-8") as f:
     writer = csv.DictWriter(
         f,
@@ -326,7 +355,9 @@ with open(CLASS_ERROR_CSV, "w", newline="", encoding="utf-8") as f:
     writer.writeheader()
     writer.writerows(class_error_rows)
 
+# -------------------------
 # Save average class error rates CSV
+# -------------------------
 with open(AVG_CLASS_ERROR_CSV, "w", newline="", encoding="utf-8") as f:
     writer = csv.DictWriter(
         f,
@@ -340,7 +371,9 @@ with open(AVG_CLASS_ERROR_CSV, "w", newline="", encoding="utf-8") as f:
     writer.writeheader()
     writer.writerows(avg_class_error_rows)
 
+# -------------------------
 # Save per-run predictions CSV
+# -------------------------
 with open(PER_RUN_CSV, "w", newline="", encoding="utf-8") as f:
     writer = csv.DictWriter(
         f,
