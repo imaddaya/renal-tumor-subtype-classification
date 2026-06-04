@@ -1,56 +1,69 @@
 import os
-import re
+from pathlib import Path
 import pandas as pd
 import matplotlib.pyplot as plt
 
 # --------------------------------------------------
 # Settings
 # --------------------------------------------------
-BASE_DIR = "/home/hpdeadman/Grad_Project/Models"
+PROJECT_DIR = Path("/home/hpdeadman/Grad_Project")
+BASE_DIR = PROJECT_DIR / "Models"
+OUTPUT_DIR = PROJECT_DIR / "model_comparison"
+OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 MODEL_INFO = {
     "ResNet18": {
-        "report_txt": os.path.join(BASE_DIR, "ResNet18", "results", "ResNet18_multisample_report.txt"),
-        "avg_error_csv": os.path.join(BASE_DIR, "ResNet18", "results", "ResNet18_multisample_average_class_error_rates.csv"),
+        "fixed_report_txt": BASE_DIR / "ResNet18" / "results" / "fixed_test" / "ResNet18_report.txt",
+        "fixed_error_csv": BASE_DIR / "ResNet18" / "results" / "fixed_test" / "ResNet18_class_error_rates.csv",
+        "multi_report_txt": BASE_DIR / "ResNet18" / "results" / "multisample" / "ResNet18_multisample_report.txt",
+        "multi_avg_error_csv": BASE_DIR / "ResNet18" / "results" / "multisample" / "ResNet18_multisample_average_class_error_rates.csv",
     },
     "ResNet18 + MIL": {
-        "report_txt": os.path.join(BASE_DIR, "ResNet18_MIL", "results", "ResNet18_MIL_multisample_report.txt"),
-        "avg_error_csv": os.path.join(BASE_DIR, "ResNet18_MIL", "results", "ResNet18_MIL_multisample_average_class_error_rates.csv"),
+        "fixed_report_txt": BASE_DIR / "ResNet18_MIL" / "results" / "fixed_test" / "ResNet18_MIL_report.txt",
+        "fixed_error_csv": BASE_DIR / "ResNet18_MIL" / "results" / "fixed_test" / "ResNet18_MIL_class_error_rates.csv",
+        "multi_report_txt": BASE_DIR / "ResNet18_MIL" / "results" / "multisample" / "ResNet18_MIL_multisample_report.txt",
+        "multi_avg_error_csv": BASE_DIR / "ResNet18_MIL" / "results" / "multisample" / "ResNet18_MIL_multisample_average_class_error_rates.csv",
     },
     "ResNet18 + MIL + Macenko": {
-        "report_txt": os.path.join(BASE_DIR, "ResNet18_MIL_Macenko", "results", "ResNet18_MIL_Macenko_multisample_report.txt"),
-        "avg_error_csv": os.path.join(BASE_DIR, "ResNet18_MIL_Macenko", "results", "ResNet18_MIL_Macenko_multisample_average_class_error_rates.csv"),
+        "fixed_report_txt": BASE_DIR / "ResNet18_MIL_Macenko" / "results" / "fixed_test" / "ResNet18_MIL_Macenko_report.txt",
+        "fixed_error_csv": BASE_DIR / "ResNet18_MIL_Macenko" / "results" / "fixed_test" / "ResNet18_MIL_Macenko_class_error_rates.csv",
+        "multi_report_txt": BASE_DIR / "ResNet18_MIL_Macenko" / "results" / "multisample" / "ResNet18_MIL_Macenko_multisample_report.txt",
+        "multi_avg_error_csv": BASE_DIR / "ResNet18_MIL_Macenko" / "results" / "multisample" / "ResNet18_MIL_Macenko_multisample_average_class_error_rates.csv",
     },
     "ResNet18 + MIL + KAN": {
-        "report_txt": os.path.join(BASE_DIR, "ResNet18_MIL_KAN", "results", "ResNet18_MIL_KAN_multisample_report.txt"),
-        "avg_error_csv": os.path.join(BASE_DIR, "ResNet18_MIL_KAN", "results", "ResNet18_MIL_KAN_multisample_average_class_error_rates.csv"),
+        "fixed_report_txt": BASE_DIR / "ResNet18_MIL_KAN" / "results" / "fixed_test" / "ResNet18_MIL_KAN_report.txt",
+        "fixed_error_csv": BASE_DIR / "ResNet18_MIL_KAN" / "results" / "fixed_test" / "ResNet18_MIL_KAN_class_error_rates.csv",
+        "multi_report_txt": BASE_DIR / "ResNet18_MIL_KAN" / "results" / "multisample" / "ResNet18_MIL_KAN_multisample_report.txt",
+        "multi_avg_error_csv": BASE_DIR / "ResNet18_MIL_KAN" / "results" / "multisample" / "ResNet18_MIL_KAN_multisample_average_class_error_rates.csv",
     },
     "ResNet18 + Vision Mamba": {
-        "report_txt": os.path.join(BASE_DIR, "ResNet18_VisionMamba", "results", "ResNet18_VisionMamba_multisample_report.txt"),
-        "avg_error_csv": os.path.join(BASE_DIR, "ResNet18_VisionMamba", "results", "ResNet18_VisionMamba_multisample_average_class_error_rates.csv"),
+        "fixed_report_txt": BASE_DIR / "ResNet18_VisionMamba" / "results" / "fixed_test" / "ResNet18_VisionMamba_report.txt",
+        "fixed_error_csv": BASE_DIR / "ResNet18_VisionMamba" / "results" / "fixed_test" / "ResNet18_VisionMamba_class_error_rates.csv",
+        "multi_report_txt": BASE_DIR / "ResNet18_VisionMamba" / "results" / "multisample" / "ResNet18_VisionMamba_multisample_report.txt",
+        "multi_avg_error_csv": BASE_DIR / "ResNet18_VisionMamba" / "results" / "multisample" / "ResNet18_VisionMamba_multisample_average_class_error_rates.csv",
     },
     "ResNet18 + Vision Mamba + KAN": {
-        "report_txt": os.path.join(BASE_DIR, "ResNet18_VisionMamba_KAN", "results", "ResNet18_VisionMamba_KAN_multisample_report.txt"),
-        "avg_error_csv": os.path.join(BASE_DIR, "ResNet18_VisionMamba_KAN", "results", "ResNet18_VisionMamba_KAN_multisample_average_class_error_rates.csv"),
+        "fixed_report_txt": BASE_DIR / "ResNet18_VisionMamba_KAN" / "results" / "fixed_test" / "ResNet18_VisionMamba_KAN_report.txt",
+        "fixed_error_csv": BASE_DIR / "ResNet18_VisionMamba_KAN" / "results" / "fixed_test" / "ResNet18_VisionMamba_KAN_class_error_rates.csv",
+        "multi_report_txt": BASE_DIR / "ResNet18_VisionMamba_KAN" / "results" / "multisample" / "ResNet18_VisionMamba_KAN_multisample_report.txt",
+        "multi_avg_error_csv": BASE_DIR / "ResNet18_VisionMamba_KAN" / "results" / "multisample" / "ResNet18_VisionMamba_KAN_multisample_average_class_error_rates.csv",
     },
 }
 
 CLASS_NAMES = ["chromophobe", "clearcell", "oncocytoma", "papillary"]
 
-OUTPUT_CSV = os.path.join("/home/hpdeadman/Grad_Project", "all_models_comparison_table.csv")
-OUTPUT_PNG = os.path.join("/home/hpdeadman/Grad_Project", "all_models_comparison_table.png")
+OVERALL_CSV = OUTPUT_DIR / "all_models_overall_summary.csv"
+OVERALL_PNG = OUTPUT_DIR / "all_models_overall_summary.png"
+
+PER_CLASS_CSV = OUTPUT_DIR / "all_models_per_class_comparison.csv"
+PER_CLASS_PNG = OUTPUT_DIR / "all_models_per_class_comparison.png"
 
 
 # --------------------------------------------------
 # Helpers
 # --------------------------------------------------
-def parse_report_metrics(report_txt_path):
-    """
-    Reads the multisample report txt and extracts:
-    precision, recall, f1-score, support
-    for each class.
-    """
-    if not os.path.exists(report_txt_path):
+def parse_report_metrics(report_txt_path: Path):
+    if not report_txt_path.exists():
         raise FileNotFoundError(f"Missing report file: {report_txt_path}")
 
     with open(report_txt_path, "r", encoding="utf-8") as f:
@@ -63,7 +76,6 @@ def parse_report_metrics(report_txt_path):
     else:
         raise ValueError(f"Could not find classification report in: {report_txt_path}")
 
-    # stop before confusion matrix
     if "Multi-sample Confusion Matrix:" in section:
         section = section.split("Multi-sample Confusion Matrix:")[0]
     elif "Confusion Matrix:" in section:
@@ -71,35 +83,83 @@ def parse_report_metrics(report_txt_path):
 
     lines = [line.rstrip() for line in section.splitlines() if line.strip()]
 
-    metrics = {}
+    result = {
+        "classes": {},
+        "accuracy": None,
+        "macro_avg": {
+            "precision": None,
+            "recall": None,
+            "f1_score": None,
+            "support": None,
+        },
+        "weighted_avg": {
+            "precision": None,
+            "recall": None,
+            "f1_score": None,
+            "support": None,
+        },
+    }
 
     for line in lines:
         stripped = line.strip()
+        parts = stripped.split()
 
         if stripped.startswith("precision"):
             continue
 
-        parts = stripped.split()
-
-        # class rows: class_name precision recall f1 support
         if len(parts) == 5 and parts[0] in CLASS_NAMES:
             class_name = parts[0]
             precision, recall, f1_score, support = parts[1:]
-            metrics[class_name] = {
+            result["classes"][class_name] = {
                 "precision": float(precision),
                 "recall": float(recall),
                 "f1_score": float(f1_score),
                 "support": int(float(support)),
             }
 
-    return metrics
+        elif len(parts) == 3 and parts[0] == "accuracy":
+            accuracy, support = parts[1:]
+            result["accuracy"] = {
+                "value": float(accuracy),
+                "support": int(float(support)),
+            }
+
+        elif len(parts) == 6 and parts[0] == "macro" and parts[1] == "avg":
+            precision, recall, f1_score, support = parts[2:]
+            result["macro_avg"] = {
+                "precision": float(precision),
+                "recall": float(recall),
+                "f1_score": float(f1_score),
+                "support": int(float(support)),
+            }
+
+        elif len(parts) == 6 and parts[0] == "weighted" and parts[1] == "avg":
+            precision, recall, f1_score, support = parts[2:]
+            result["weighted_avg"] = {
+                "precision": float(precision),
+                "recall": float(recall),
+                "f1_score": float(f1_score),
+                "support": int(float(support)),
+            }
+
+    return result
 
 
-def load_avg_error_rates(avg_error_csv_path):
-    """
-    Reads average class-specific error rates across runs.
-    """
-    if not os.path.exists(avg_error_csv_path):
+def load_fixed_error_rates(error_csv_path: Path):
+    if not error_csv_path.exists():
+        raise FileNotFoundError(f"Missing fixed error csv: {error_csv_path}")
+
+    df = pd.read_csv(error_csv_path)
+
+    error_map = {}
+    for _, row in df.iterrows():
+        error_map[row["class"]] = float(row["error_rate"])
+
+    return error_map
+
+
+def load_multi_avg_error_rates(avg_error_csv_path: Path):
+    if not avg_error_csv_path.exists():
         raise FileNotFoundError(f"Missing avg error csv: {avg_error_csv_path}")
 
     df = pd.read_csv(avg_error_csv_path)
@@ -111,69 +171,131 @@ def load_avg_error_rates(avg_error_csv_path):
     return error_map
 
 
+def save_table_png(df: pd.DataFrame, title: str, output_path: Path, font_size=8, x_scale=1.2, y_scale=1.2):
+    display_df = df.copy()
+
+    fig_height = max(3.5, 1.5 + len(display_df) * 0.35)
+    fig_width = max(12, len(display_df.columns) * 1.6)
+
+    fig, ax = plt.subplots(figsize=(fig_width, fig_height))
+    ax.axis("off")
+
+    table = ax.table(
+        cellText=display_df.values,
+        colLabels=display_df.columns,
+        loc="center",
+        cellLoc="center",
+    )
+
+    table.auto_set_font_size(False)
+    table.set_fontsize(font_size)
+    table.scale(x_scale, y_scale)
+
+    plt.title(title, pad=20)
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=300, bbox_inches="tight")
+    plt.close()
+
+
 # --------------------------------------------------
-# Build comparison table
+# Build tables
 # --------------------------------------------------
-rows = []
+overall_rows = []
+per_class_rows = []
 
 for model_name, paths in MODEL_INFO.items():
-    report_metrics = parse_report_metrics(paths["report_txt"])
-    avg_error_rates = load_avg_error_rates(paths["avg_error_csv"])
+    fixed_report = parse_report_metrics(paths["fixed_report_txt"])
+    multi_report = parse_report_metrics(paths["multi_report_txt"])
+
+    fixed_errors = load_fixed_error_rates(paths["fixed_error_csv"])
+    multi_errors = load_multi_avg_error_rates(paths["multi_avg_error_csv"])
+
+    fixed_avg_error = sum(fixed_errors.values()) / len(fixed_errors) if fixed_errors else 0.0
+    multi_avg_error = sum(multi_errors.values()) / len(multi_errors) if multi_errors else 0.0
+
+    overall_rows.append({
+        "model": model_name,
+        "fixed_accuracy": round(fixed_report["accuracy"]["value"], 4) if fixed_report["accuracy"] else None,
+        "fixed_macro_precision": round(fixed_report["macro_avg"]["precision"], 4),
+        "fixed_macro_recall": round(fixed_report["macro_avg"]["recall"], 4),
+        "fixed_macro_f1": round(fixed_report["macro_avg"]["f1_score"], 4),
+        "fixed_avg_error_rate": round(fixed_avg_error, 4),
+        "multi_accuracy": round(multi_report["accuracy"]["value"], 4) if multi_report["accuracy"] else None,
+        "multi_macro_precision": round(multi_report["macro_avg"]["precision"], 4),
+        "multi_macro_recall": round(multi_report["macro_avg"]["recall"], 4),
+        "multi_macro_f1": round(multi_report["macro_avg"]["f1_score"], 4),
+        "multi_avg_error_rate": round(multi_avg_error, 4),
+    })
 
     for class_name in CLASS_NAMES:
-        if class_name not in report_metrics:
-            continue
+        fixed_class = fixed_report["classes"].get(class_name, {})
+        multi_class = multi_report["classes"].get(class_name, {})
 
-        rows.append({
+        per_class_rows.append({
             "model": model_name,
             "class": class_name,
-            "precision": round(report_metrics[class_name]["precision"], 4),
-            "recall": round(report_metrics[class_name]["recall"], 4),
-            "f1_score": round(report_metrics[class_name]["f1_score"], 4),
-            "error_rate": round(avg_error_rates.get(class_name, 0.0), 4),
+            "fixed_precision": round(fixed_class.get("precision", 0.0), 4),
+            "fixed_recall": round(fixed_class.get("recall", 0.0), 4),
+            "fixed_f1": round(fixed_class.get("f1_score", 0.0), 4),
+            "fixed_error_rate": round(fixed_errors.get(class_name, 0.0), 4),
+            "multi_precision": round(multi_class.get("precision", 0.0), 4),
+            "multi_recall": round(multi_class.get("recall", 0.0), 4),
+            "multi_f1": round(multi_class.get("f1_score", 0.0), 4),
+            "multi_error_rate": round(multi_errors.get(class_name, 0.0), 4),
         })
 
-comparison_df = pd.DataFrame(rows)
+overall_df = pd.DataFrame(overall_rows)
+per_class_df = pd.DataFrame(per_class_rows)
 
-# nicer ordering
 model_order = list(MODEL_INFO.keys())
-comparison_df["model"] = pd.Categorical(comparison_df["model"], categories=model_order, ordered=True)
-comparison_df["class"] = pd.Categorical(comparison_df["class"], categories=CLASS_NAMES, ordered=True)
-comparison_df = comparison_df.sort_values(["model", "class"]).reset_index(drop=True)
+overall_df["model"] = pd.Categorical(overall_df["model"], categories=model_order, ordered=True)
+overall_df = overall_df.sort_values("model").reset_index(drop=True)
 
-# save csv
-comparison_df.to_csv(OUTPUT_CSV, index=False)
+per_class_df["model"] = pd.Categorical(per_class_df["model"], categories=model_order, ordered=True)
+per_class_df["class"] = pd.Categorical(per_class_df["class"], categories=CLASS_NAMES, ordered=True)
+per_class_df = per_class_df.sort_values(["model", "class"]).reset_index(drop=True)
 
-# --------------------------------------------------
-# Save PNG table
-# --------------------------------------------------
-display_df = comparison_df.copy()
-display_df["precision"] = display_df["precision"].map(lambda x: f"{x:.4f}")
-display_df["recall"] = display_df["recall"].map(lambda x: f"{x:.4f}")
-display_df["f1_score"] = display_df["f1_score"].map(lambda x: f"{x:.4f}")
-display_df["error_rate"] = display_df["error_rate"].map(lambda x: f"{x:.4f}")
+# Save CSVs
+overall_df.to_csv(OVERALL_CSV, index=False)
+per_class_df.to_csv(PER_CLASS_CSV, index=False)
 
-fig_height = 2 + len(display_df) * 0.35
-fig, ax = plt.subplots(figsize=(14, fig_height))
-ax.axis("off")
+# Format for PNGs
+overall_display_df = overall_df.copy()
+for col in overall_display_df.columns:
+    if col != "model":
+        overall_display_df[col] = overall_display_df[col].map(lambda x: f"{x:.4f}")
 
-table = ax.table(
-    cellText=display_df.values,
-    colLabels=display_df.columns,
-    loc="center",
-    cellLoc="center",
+per_class_display_df = per_class_df.copy()
+for col in per_class_display_df.columns:
+    if col not in ["model", "class"]:
+        per_class_display_df[col] = per_class_display_df[col].map(lambda x: f"{x:.4f}")
+
+save_table_png(
+    overall_display_df,
+    "Overall Comparison of All Models",
+    OVERALL_PNG,
+    font_size=8,
+    x_scale=1.2,
+    y_scale=1.25,
 )
 
-table.auto_set_font_size(False)
-table.set_fontsize(8)
-table.scale(1.15, 1.2)
-
-plt.title("Comparison of All Models Across All Tumor Classes", pad=20)
-plt.savefig(OUTPUT_PNG, dpi=300, bbox_inches="tight")
-plt.close()
+save_table_png(
+    per_class_display_df,
+    "Per-Class Comparison of All Models",
+    PER_CLASS_PNG,
+    font_size=7,
+    x_scale=1.15,
+    y_scale=1.15,
+)
 
 print("Saved:")
-print(OUTPUT_CSV)
-print(OUTPUT_PNG)
-print("\nPreview:")
-print(comparison_df)
+print(OVERALL_CSV)
+print(OVERALL_PNG)
+print(PER_CLASS_CSV)
+print(PER_CLASS_PNG)
+
+print("\nOverall summary preview:")
+print(overall_df)
+
+print("\nPer-class summary preview:")
+print(per_class_df.head(12))

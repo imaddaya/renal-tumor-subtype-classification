@@ -1,0 +1,25 @@
+model,class,fixed_precision,fixed_recall,fixed_f1,fixed_error_rate,multi_precision,multi_recall,multi_f1,multi_error_rate
+ResNet18,chromophobe,0.0,0.0,0.0,1.0,0.0,0.0,0.0,1.0
+ResNet18,clearcell,0.2941,1.0,0.4545,0.0,0.2941,1.0,0.4545,0.0
+ResNet18,oncocytoma,0.0,0.0,0.0,1.0,0.0,0.0,0.0,1.0
+ResNet18,papillary,1.0,0.4,0.5714,0.6,1.0,0.4,0.5714,0.6
+ResNet18 + MIL,chromophobe,0.5,0.4,0.4444,0.6,0.5,0.4,0.4444,0.64
+ResNet18 + MIL,clearcell,1.0,0.8,0.8889,0.2,1.0,0.6,0.75,0.3
+ResNet18 + MIL,oncocytoma,0.375,0.6,0.4615,0.4,0.3333,0.6,0.4286,0.3
+ResNet18 + MIL,papillary,1.0,0.8,0.8889,0.2,1.0,0.8,0.8889,0.22
+ResNet18 + MIL + Macenko,chromophobe,1.0,0.6,0.75,0.4,1.0,0.6,0.75,0.5
+ResNet18 + MIL + Macenko,clearcell,1.0,1.0,1.0,0.0,1.0,1.0,1.0,0.04
+ResNet18 + MIL + Macenko,oncocytoma,0.8333,1.0,0.9091,0.0,0.8333,1.0,0.9091,0.04
+ResNet18 + MIL + Macenko,papillary,0.8333,1.0,0.9091,0.0,0.8333,1.0,0.9091,0.02
+ResNet18 + MIL + KAN,chromophobe,0.0,0.0,0.0,1.0,0.0,0.0,0.0,1.0
+ResNet18 + MIL + KAN,clearcell,0.25,0.8,0.381,0.2,0.25,0.8,0.381,0.2
+ResNet18 + MIL + KAN,oncocytoma,0.0,0.0,0.0,1.0,0.0,0.0,0.0,1.0
+ResNet18 + MIL + KAN,papillary,1.0,0.6,0.75,0.4,1.0,0.6,0.75,0.4
+ResNet18 + Vision Mamba,chromophobe,0.0,0.0,0.0,1.0,0.0,0.0,0.0,1.0
+ResNet18 + Vision Mamba,clearcell,1.0,0.6,0.75,0.4,0.5,0.4,0.4444,0.6
+ResNet18 + Vision Mamba,oncocytoma,0.3846,1.0,0.5556,0.0,0.3846,1.0,0.5556,0.0
+ResNet18 + Vision Mamba,papillary,1.0,0.8,0.8889,0.2,1.0,0.6,0.75,0.36
+ResNet18 + Vision Mamba + KAN,chromophobe,0.0,0.0,0.0,1.0,0.0,0.0,0.0,1.0
+ResNet18 + Vision Mamba + KAN,clearcell,0.4444,0.8,0.5714,0.2,0.5,0.8,0.6154,0.26
+ResNet18 + Vision Mamba + KAN,oncocytoma,0.375,0.6,0.4615,0.4,0.3333,0.4,0.3636,0.48
+ResNet18 + Vision Mamba + KAN,papillary,0.6667,0.4,0.5,0.6,0.5,0.6,0.5455,0.52
