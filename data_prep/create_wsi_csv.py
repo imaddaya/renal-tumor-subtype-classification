@@ -32,21 +32,15 @@ for split in ["train", "validate", "test"]:
             if not wsi_folder.is_dir():
                 continue
 
-            patch_files = [
-                f for f in wsi_folder.iterdir()
-                if f.is_file() and f.suffix.lower() in [".png", ".jpg", ".jpeg", ".tif", ".tiff"]
-            ]
-
             rows.append({
                 "wsi_id": wsi_folder.name,
                 "label": full_label,
                 "split": split,
-                "patch_dir": str(Path(split) / short_label / wsi_folder.name),
-                "num_patches": len(patch_files)
+                "patch_dir": str(Path(split) / short_label / wsi_folder.name)
             })
 
 with open(OUTPUT_CSV, "w", newline="", encoding="utf-8") as csvfile:
-    fieldnames = ["wsi_id", "label", "split", "patch_dir", "num_patches"]
+    fieldnames = ["wsi_id", "label", "split", "patch_dir"]
     writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
     writer.writeheader()
     writer.writerows(rows)
