@@ -3,19 +3,25 @@ from fastapi.middleware.cors import CORSMiddleware
 from PIL import Image
 import io
 import os
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from runtime_config import cors_origins, models_dir, macenko_reference_path
 import numpy as np
 
 import torch
 import torch.nn as nn
 from torchvision import models, transforms
 import torchstain
+from functools import lru_cache
 
 app = FastAPI(title="RCC Inference API - venv models")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=cors_origins(),
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -32,7 +38,7 @@ IMAGE_SIZE = 224
 WHITE_THRESHOLD = 220
 WHITE_DROP_THRESHOLD = 95.0
 
-BASE_DIR = "/home/hpdeadman/Grad_Project/Models"
+BASE_DIR = models_dir()
 
 MODEL_PATH_CANDIDATES = {
     "ResNet18": [
@@ -59,7 +65,7 @@ MIL_MODELS = {
     "ResNet18 + MIL + KAN",
 }
 
-TARGET_IMAGE_PATH = "/home/hpdeadman/Grad_Project/data/train/c/DHMC_0040/p_2688_3808.jpg"
+TARGET_IMAGE_PATH = macenko_reference_path()
 
 transform = transforms.Compose([
     transforms.Resize((IMAGE_SIZE, IMAGE_SIZE)),
@@ -71,15 +77,23 @@ macenko_transform = transforms.Compose([
     transforms.Lambda(lambda x: x * 255)
 ])
 
-normalizer = torchstain.normalizers.MacenkoNormalizer(backend="torch")
-target_img = Image.open(TARGET_IMAGE_PATH).convert("RGB")
-target_tensor = macenko_transform(target_img)
-normalizer.fit(target_tensor)
+@lru_cache(maxsize=1)
+def get_normalizer():
+    if not TARGET_IMAGE_PATH.is_file():
+        raise HTTPException(status_code=503, detail="Macenko reference image is missing. Set RCC_MACENKO_REFERENCE to the training reference image.")
+    try:
+        normalizer = torchstain.normalizers.MacenkoNormalizer(backend="torch")
+        with Image.open(TARGET_IMAGE_PATH) as image:
+            target_tensor = macenko_transform(image.convert("RGB"))
+        normalizer.fit(target_tensor)
+        return normalizer
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="Macenko reference image could not be fitted. Check RCC_MACENKO_REFERENCE.") from exc
 
 
 def macenko_normalize_pil(pil_img: Image.Image) -> Image.Image:
     src = macenko_transform(pil_img)
-    norm = normalizer.normalize(src)[0]
+    norm = get_normalizer().normalize(src)[0]
 
     if isinstance(norm, torch.Tensor):
         arr = norm.detach().cpu().numpy()
@@ -111,7 +125,7 @@ def get_top_prediction(probabilities: dict[str, float]) -> str:
 class SimpleWSIModel(nn.Module):
     def __init__(self, num_classes: int = 4):
         super().__init__()
-        backbone = models.resnet18(weights=models.ResNet18_Weights.DEFAULT)
+        backbone = models.resnet18(weights=None)
         feat_dim = backbone.fc.in_features
         backbone.fc = nn.Identity()
         self.backbone = backbone
@@ -129,7 +143,7 @@ class SimpleWSIModel(nn.Module):
 class AttentionMILModel(nn.Module):
     def __init__(self, num_classes: int = 4, attn_dim: int = 128):
         super().__init__()
-        backbone = models.resnet18(weights=models.ResNet18_Weights.DEFAULT)
+        backbone = models.resnet18(weights=None)
         feat_dim = backbone.fc.in_features
         backbone.fc = nn.Identity()
         self.backbone = backbone
@@ -190,7 +204,7 @@ class KANClassifier(nn.Module):
 class AttentionMILKANModel(nn.Module):
     def __init__(self, num_classes: int = 4, attn_dim: int = 128, kan_hidden: int = 128):
         super().__init__()
-        backbone = models.resnet18(weights=models.ResNet18_Weights.DEFAULT)
+        backbone = models.resnet18(weights=None)
         feat_dim = backbone.fc.in_features
         backbone.fc = nn.Identity()
         self.backbone = backbone
@@ -248,9 +262,12 @@ def get_model(model_name: str) -> nn.Module:
     if model_name in MODELS:
         return MODELS[model_name]
 
-    model_path = resolve_model_path(model_name)
+    try:
+        model_path = resolve_model_path(model_name)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=503, detail="Model weights are unavailable. Check RCC_MODELS_DIR and the documented weight filenames.") from exc
     model = build_model(model_name).to(DEVICE)
-    state_dict = torch.load(model_path, map_location=DEVICE)
+    state_dict = torch.load(model_path, map_location=DEVICE, weights_only=True)
     model.load_state_dict(state_dict)
     model.eval()
     MODELS[model_name] = model
@@ -307,8 +324,10 @@ def prepare_patch_tensors(
         if model_name == "ResNet18 + MIL + Macenko":
             try:
                 image = macenko_normalize_pil(image)
-            except Exception:
-                pass
+            except HTTPException:
+                raise
+            except Exception as exc:
+                raise HTTPException(status_code=422, detail="A patch could not be Macenko-normalized; unnormalized inference was not performed.") from exc
 
         tensor = transform(image)
         patch_tensors.append(tensor)
@@ -331,6 +350,7 @@ def health():
         "min_upload_patches": MIN_UPLOAD_PATCHES,
         "max_upload_patches": MAX_UPLOAD_PATCHES,
         "model_num_patches": MODEL_NUM_PATCHES,
+        "weights_available": {name: any(Path(p).is_file() for p in paths) for name, paths in MODEL_PATH_CANDIDATES.items()},
     }
 
 

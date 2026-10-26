@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 # --------------------------------------------------
 # Settings
 # --------------------------------------------------
-PROJECT_DIR = Path("/home/hpdeadman/Grad_Project")
+PROJECT_DIR = Path(__file__).resolve().parent
 BASE_DIR = PROJECT_DIR / "Models"
 OUTPUT_DIR = PROJECT_DIR / "model_comparison"
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)

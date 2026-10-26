@@ -28,8 +28,12 @@ function getBackendUrl(modelName) {
     "ResNet18 + Vision Mamba + KAN",
   ];
 
-  if (venvModels.includes(modelName)) return "http://localhost:8001/predict";
-  if (newvenvModels.includes(modelName)) return "http://localhost:8002/predict";
+  if (venvModels.includes(modelName)) {
+    return `${(import.meta.env.VITE_VENV_API_URL || "http://localhost:8001").replace(/\/$/, "")}/predict`;
+  }
+  if (newvenvModels.includes(modelName)) {
+    return `${(import.meta.env.VITE_NEWVENV_API_URL || "http://localhost:8002").replace(/\/$/, "")}/predict`;
+  }
   throw new Error(`Unknown model: ${modelName}`);
 }
 

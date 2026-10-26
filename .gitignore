@@ -32,8 +32,13 @@ all_models_comparison_table.png
 model_comparison.csv
 
 # Accidental root npm lock file
-package-lock.json
+/package-lock.json
 
 # Generated model result files
 Models/**/results/*.csv
 Models/**/results/*.txt
+
+.venv*/
+.env
+.env.*
+!.env.example

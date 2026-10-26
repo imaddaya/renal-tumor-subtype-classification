@@ -1,0 +1,16 @@
+# CPU inference only.
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.13.0+cpu
+torchvision==0.28.0+cpu
+fastapi==0.136.1
+numpy==2.4.4
+pillow==13.0.0
+python-multipart==0.0.31
+uvicorn==0.47.0
+torchstain==1.4.1
+
+# Patched transitive versions; some PyTorch indexes host old wheels.
+certifi>=2026.10.19
+idna>=3.15
+filelock>=4.2.1
+setuptools>=84.1.0

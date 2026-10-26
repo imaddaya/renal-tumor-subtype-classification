@@ -3,6 +3,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from PIL import Image
 import io
 import os
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from runtime_config import cors_origins, models_dir
 import numpy as np
 
 import torch
@@ -15,8 +20,8 @@ app = FastAPI(title="RCC Inference API - newvenv models")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=cors_origins(),
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -33,7 +38,7 @@ IMAGE_SIZE = 224
 WHITE_THRESHOLD = 220
 WHITE_DROP_THRESHOLD = 95.0
 
-BASE_DIR = "/home/hpdeadman/Grad_Project/Models"
+BASE_DIR = models_dir()
 
 MODEL_PATH_CANDIDATES = {
     "ResNet18 + Vision Mamba": [
@@ -70,7 +75,7 @@ def get_top_prediction(probabilities: dict[str, float]) -> str:
 class ResNet18VisionMambaModel(nn.Module):
     def __init__(self, num_classes=4, d_state=16, d_conv=4, expand=2):
         super().__init__()
-        backbone = models.resnet18(weights=models.ResNet18_Weights.DEFAULT)
+        backbone = models.resnet18(weights=None)
         feat_dim = backbone.fc.in_features
         backbone.fc = nn.Identity()
         self.backbone = backbone
@@ -95,7 +100,7 @@ class ResNet18VisionMambaModel(nn.Module):
 class ResNet18VisionMambaKANModel(nn.Module):
     def __init__(self, num_classes=4, d_state=16, d_conv=4, expand=2):
         super().__init__()
-        backbone = models.resnet18(weights=models.ResNet18_Weights.DEFAULT)
+        backbone = models.resnet18(weights=None)
         feat_dim = backbone.fc.in_features
         backbone.fc = nn.Identity()
         self.backbone = backbone
@@ -140,9 +145,12 @@ def get_model(model_name: str) -> nn.Module:
     if model_name in MODELS:
         return MODELS[model_name]
 
-    model_path = resolve_model_path(model_name)
+    try:
+        model_path = resolve_model_path(model_name)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=503, detail="Model weights are unavailable. Check RCC_MODELS_DIR and the documented weight filenames.") from exc
     model = build_model(model_name).to(DEVICE)
-    state_dict = torch.load(model_path, map_location=DEVICE)
+    state_dict = torch.load(model_path, map_location=DEVICE, weights_only=True)
     model.load_state_dict(state_dict)
     model.eval()
     MODELS[model_name] = model
@@ -213,6 +221,7 @@ def health():
         "min_upload_patches": MIN_UPLOAD_PATCHES,
         "max_upload_patches": MAX_UPLOAD_PATCHES,
         "model_num_patches": MODEL_NUM_PATCHES,
+        "weights_available": {name: any(Path(p).is_file() for p in paths) for name, paths in MODEL_PATH_CANDIDATES.items()},
     }
 
 

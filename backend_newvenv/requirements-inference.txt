@@ -1,0 +1,18 @@
+# Install torch first; compile mamba-ssm separately without build isolation.
+--extra-index-url https://download.pytorch.org/whl/cu126
+torch==2.13.0+cu126
+torchvision==0.28.0+cu126
+fastapi==0.136.1
+numpy==2.4.4
+pillow==13.0.0
+python-multipart==0.0.31
+uvicorn==0.47.0
+einops==0.8.2
+ninja==1.13.0
+efficient-kan @ git+https://github.com/Blealtan/efficient-kan.git@7b6ce1c87f18c8bc90c208f6b494042344216b11
+
+# Patched transitive versions; some PyTorch indexes host old wheels.
+certifi>=2026.10.19
+idna>=3.15
+filelock>=4.2.1
+setuptools>=84.1.0
